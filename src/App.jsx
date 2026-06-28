@@ -36,7 +36,7 @@ const COLS = [
   { key: "centro_costo", label: "Centro costo", muted: true, width: 110 },
   { key: "status", label: "Status viaje", width: 110 },
   { key: "criterio_falla", label: "Criterio falla", trunc: true, muted: true, width: 110 },
-  { key: "spot", label: "SPOT", width: 60 },
+  { key: "spot", label: "Detalle de Servicio", trunc: true, width: 160 },
   { key: "importe_servicio", label: "Importe S/", right: true, width: 90 },
   { key: "validador_ejecucion", label: "Validador", muted: true, width: 90 },
   { key: "proveedor", label: "Proveedor", width: 90 },
@@ -112,28 +112,37 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const fetchViajesRef = useRef(null);
+
   const fetchViajes = useCallback(async () => {
     if (!session) return;
     setDataLoading(true);
     const meta = session.user.user_metadata;
     const isAdmin = meta?.role === "admin";
+    const filters = fetchViajesRef.current || {};
     let q = supabase.from("viajes").select("*").order("fecha_carga", { ascending: false });
     if (!isAdmin && meta?.empresa_id) q = q.eq("empresa_id", meta.empresa_id);
-    if (fDesde) q = q.gte("fecha_carga", fDesde);
-    if (fHasta) q = q.lte("fecha_carga", fHasta);
-    if (fStatus) q = q.ilike("status", `%${fStatus}%`);
-    if (fNroSpot) q = q.ilike("nro_id_spot", `%${fNroSpot}%`);
-    if (fRutas) q = q.ilike("rutas", `%${fRutas}%`);
-    if (fIdCorr) q = q.ilike("id_correlativo", `%${fIdCorr}%`);
+    if (filters.fDesde) q = q.gte("fecha_carga", filters.fDesde);
+    if (filters.fHasta) q = q.lte("fecha_carga", filters.fHasta);
+    if (filters.fStatus) q = q.ilike("status", `%${filters.fStatus}%`);
+    if (filters.fNroSpot) q = q.ilike("nro_id_spot", `%${filters.fNroSpot}%`);
+    if (filters.fRutas) q = q.ilike("rutas", `%${filters.fRutas}%`);
+    if (filters.fIdCorr) q = q.ilike("id_correlativo", `%${filters.fIdCorr}%`);
     const { data } = await q;
     let rows = data || [];
-    if (fEstadoDoc === "Completo") rows = rows.filter(r => (r.foto_versiones?.length || 0) > 0);
-    if (fEstadoDoc === "Pendiente") rows = rows.filter(r => !(r.foto_versiones?.length > 0));
+    if (filters.fEstadoDoc === "Completo") rows = rows.filter(r => (r.foto_versiones?.length || 0) > 0);
+    if (filters.fEstadoDoc === "Pendiente") rows = rows.filter(r => !(r.foto_versiones?.length > 0));
     setViajes(rows);
     setDataLoading(false);
-  }, [session, fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr]);
+  }, [session]);
 
-  useEffect(() => { fetchViajes(); }, [fetchViajes]);
+  // Solo carga al iniciar sesión — no refresca al cambiar de pestaña
+  useEffect(() => { if (session) fetchViajes(); }, [session]);
+
+  // Actualiza los filtros en el ref sin disparar refetch
+  useEffect(() => {
+    fetchViajesRef.current = { fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr };
+  }, [fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr]);
 
   async function doLogin(e) {
     e.preventDefault();
@@ -202,22 +211,20 @@ export default function App() {
 
   if (!session) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: GRAY_100 }}>
-      <div style={{ background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 16, padding: "32px 28px", width: 340 }}>
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 8, objectFit: "contain" }} />
-            <div style={{ fontSize: 20, fontWeight: 500, color: RED, letterSpacing: "-.3px" }}>Pharma<span style={{ color: GRAY_900 }}>SPOT</span></div>
-          </div>
-          <div style={{ fontSize: 12, color: GRAY_500 }}>Seguimiento Adicionales</div>
+      <div style={{ background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 16, padding: "36px 36px", width: 400 }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <img src="/logo_fape.png" alt="FP" style={{ width: 48, height: 48, borderRadius: 10, objectFit: "contain", marginBottom: 12 }} />
+          <div style={{ fontSize: 22, fontWeight: 500, color: RED, letterSpacing: "-.3px" }}>Pharma<span style={{ color: GRAY_900 }}>SPOT</span></div>
+          <div style={{ fontSize: 13, color: GRAY_500, marginTop: 4 }}>Seguimiento Adicionales</div>
         </div>
         <form onSubmit={doLogin}>
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Correo</div>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="usuario@empresa.com" style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "8px 10px" }} />
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "8px 10px" }} />
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Contraseña</div>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "8px 10px" }} />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "8px 10px" }} />
           </div>
           {loginErr && <div style={{ fontSize: 11, color: RED, marginBottom: 10 }}>{loginErr}</div>}
           <button type="submit" style={{ width: "100%", padding: 9, background: RED, color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Ingresar</button>
@@ -234,7 +241,7 @@ export default function App() {
         <img src="/logo_fape.png" alt="FP" style={{ width: 30, height: 30, borderRadius: 6, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
         <span style={{ fontSize: 16, fontWeight: 500, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .6, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ width: 1, height: 18, background: "rgba(255,255,255,.25)" }} />
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,.7)" }}>Seguimiento Adicionales</span>
+        <span style={{ fontSize: 13, color: "rgba(255,255,255,.75)", fontWeight: 400 }}>Seguimiento Adicionales</span>
         <div style={{ marginLeft: "auto", position: "relative" }} ref={userMenuRef}>
           <button onClick={() => setUserMenuOpen(o => !o)}
             style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,.2)", border: "1.5px solid rgba(255,255,255,.35)", color: "white", fontSize: 12, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -257,7 +264,7 @@ export default function App() {
 
       {/* TOOLBAR */}
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: GRAY_900, flex: 1 }}>{isAdmin ? "Todos los transportes" : empresa}</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: GRAY_900, flex: 1 }}>{isAdmin ? "Todos los transportes" : empresa}</span>
         <button onClick={() => { setFDesde(""); setFHasta(""); setFStatus(""); setFEstadoDoc(""); setFNroSpot(""); setFRutas(""); setFIdCorr(""); setFilterOpen(false); }}
           style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }} title="Limpiar filtros">✕</button>
         <button onClick={fetchViajes}
