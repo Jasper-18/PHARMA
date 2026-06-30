@@ -42,6 +42,14 @@ const COLS = [
   { key: "proveedor", label: "Proveedor", width: 90 },
 ];
 
+// Extrae el número final de un id_correlativo (ej: "RICPAL Nro4465" -> 4465)
+// para poder ordenar por ese número sin alterar el campo en la base de datos.
+function extraerNumeroId(id) {
+  if (!id) return -1;
+  const m = String(id).match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
 async function comprimirImagen(file) {
   if (file.size > MAX_MB * 1024 * 1024) {
     throw new Error(`El archivo supera los ${MAX_MB} MB. Por favor selecciona una imagen más pequeña.`);
@@ -93,6 +101,7 @@ export default function App() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [modal, setModal] = useState(null);
+  const [corteInfo, setCorteInfo] = useState(null); // { label, fecha } — se fija en cada fetch dentro de rango válido
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadErr, setUploadErr] = useState("");
@@ -132,8 +141,30 @@ export default function App() {
     let rows = data || [];
     if (filters.fEstadoDoc === "Completo") rows = rows.filter(r => (r.foto_versiones?.length || 0) > 0);
     if (filters.fEstadoDoc === "Pendiente") rows = rows.filter(r => !(r.foto_versiones?.length > 0));
+
+    // Orden de filas: fecha_carga desc (ya viene de Supabase) + desempate secundario
+    // por los dígitos finales del id_correlativo (desc), solo para la vista —
+    // no modifica nada en la base de datos.
+    rows = [...rows].sort((a, b) => {
+      if (a.fecha_carga !== b.fecha_carga) return 0; // respeta el orden por fecha que ya trajo Supabase
+      return extraerNumeroId(b.id_correlativo) - extraerNumeroId(a.id_correlativo);
+    });
+
     setViajes(rows);
     setDataLoading(false);
+
+    // Corte: se fija según la hora REAL en que se hizo este fetch, no en cada render.
+    // 8:00am-10:00am -> "8:30 am" fijo. 4:00pm-7:00pm -> "4:00 pm" fijo.
+    // Fuera de esos rangos: se deja el último corte calculado, sin cambiarlo.
+    const ahora = new Date();
+    const hora = ahora.getHours() + ahora.getMinutes() / 60;
+    const fechaStr = ahora.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    if (hora >= 8 && hora < 10) {
+      setCorteInfo({ label: `${fechaStr} · 8:30 am` });
+    } else if (hora >= 16 && hora < 19) {
+      setCorteInfo({ label: `${fechaStr} · 4:00 pm` });
+    }
+    // si está fuera de rango, no se toca corteInfo (queda el último valor)
   }, [session]);
 
   // Solo carga al iniciar sesión — no refresca al cambiar de pestaña
@@ -207,15 +238,17 @@ export default function App() {
   const initials = (session?.user?.email || "U").substring(0, 2).toUpperCase();
   const inp = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
 
-  // Corte predefinido: 8:00am (de 8:00 a 16:29) o 4:30pm (de 16:30 a 7:59 del día siguiente)
-  const ahora = new Date();
-  const hora = ahora.getHours() + ahora.getMinutes() / 60;
-  const esCorteManana = hora >= 8 && hora < 16.5;
-  // Si es antes de las 8am, el corte vigente es el 4:30pm de AYER
-  const fechaCorte = new Date(ahora);
-  if (hora < 8) fechaCorte.setDate(fechaCorte.getDate() - 1);
-  const fechaCorteStr = fechaCorte.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
-  const corteLabel = esCorteManana ? `${fechaCorteStr} · 8:00 am` : `${fechaCorteStr} · 4:30 pm`;
+  // Corte: se muestra el último corte fijado por fetchViajes (hora real de actualización).
+  // Antes del primer fetch, se calcula un valor inicial razonable como placeholder.
+  let corteLabel = corteInfo?.label;
+  if (!corteLabel) {
+    const ahora = new Date();
+    const hora = ahora.getHours() + ahora.getMinutes() / 60;
+    const fechaCorte = new Date(ahora);
+    if (hora < 8) fechaCorte.setDate(fechaCorte.getDate() - 1);
+    const fechaCorteStr = fechaCorte.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    corteLabel = (hora >= 8 && hora < 16.5) ? `${fechaCorteStr} · 8:00 am` : `${fechaCorteStr} · 4:30 pm`;
+  }
 
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><p style={{ color: GRAY_500, fontSize: 13 }}>Cargando...</p></div>;
 
