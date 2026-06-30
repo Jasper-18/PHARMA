@@ -207,6 +207,16 @@ export default function App() {
   const initials = (session?.user?.email || "U").substring(0, 2).toUpperCase();
   const inp = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
 
+  // Corte predefinido: 8:00am (de 8:00 a 16:29) o 4:30pm (de 16:30 a 7:59 del día siguiente)
+  const ahora = new Date();
+  const hora = ahora.getHours() + ahora.getMinutes() / 60;
+  const esCorteManana = hora >= 8 && hora < 16.5;
+  // Si es antes de las 8am, el corte vigente es el 4:30pm de AYER
+  const fechaCorte = new Date(ahora);
+  if (hora < 8) fechaCorte.setDate(fechaCorte.getDate() - 1);
+  const fechaCorteStr = fechaCorte.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  const corteLabel = esCorteManana ? `${fechaCorteStr} · 8:00 am` : `${fechaCorteStr} · 4:30 pm`;
+
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><p style={{ color: GRAY_500, fontSize: 13 }}>Cargando...</p></div>;
 
   if (!session) return (
@@ -242,7 +252,17 @@ export default function App() {
         <span style={{ fontSize: 16, fontWeight: 500, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .6, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ width: 1, height: 18, background: "rgba(255,255,255,.25)" }} />
         <span style={{ fontSize: 13, color: "rgba(255,255,255,.75)", fontWeight: 400 }}>Seguimiento Adicionales</span>
-        <div style={{ marginLeft: "auto", position: "relative" }} ref={userMenuRef}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Tarjeta de corte */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 9, color: "rgba(255,255,255,.6)", textTransform: "uppercase", letterSpacing: ".05em" }}>Último corte</div>
+              <div style={{ fontSize: 11, color: "white", fontWeight: 500 }}>{corteLabel}</div>
+            </div>
+          </div>
+          {/* Menú usuario */}
+          <div style={{ position: "relative" }} ref={userMenuRef}>
           <button onClick={() => setUserMenuOpen(o => !o)}
             style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,.2)", border: "1.5px solid rgba(255,255,255,.35)", color: "white", fontSize: 12, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             {initials}
@@ -259,6 +279,7 @@ export default function App() {
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 
