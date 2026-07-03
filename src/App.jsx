@@ -106,7 +106,8 @@ export default function App() {
   const [editRutas, setEditRutas] = useState([]);     // array de strings
   const [editRutaInput, setEditRutaInput] = useState("");
   const [editSaving, setEditSaving] = useState(false);
-  const [editErr, setEditErr] = useState(""); // { label, fecha } — se fija en cada fetch dentro de rango válido
+  const [editErr, setEditErr] = useState("");
+  const [corteInfo, setCorteInfo] = useState(null); // se fija en cada fetch dentro de rango válido
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadErr, setUploadErr] = useState("");
@@ -436,9 +437,9 @@ export default function App() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
               <colgroup>
                 {COLS.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
-                <col style={{ width: 50 }} />  {/* Editar */}
-                <col style={{ width: 96 }} />  {/* Estado doc */}
-                <col style={{ width: 96 }} />  {/* Doc. adjuntos */}
+                <col style={{ width: 50 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: 96 }} />
               </colgroup>
               <thead>
                 <tr>
