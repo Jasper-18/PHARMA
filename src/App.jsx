@@ -101,7 +101,12 @@ export default function App() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [modal, setModal] = useState(null);
-  const [corteInfo, setCorteInfo] = useState(null); // { label, fecha } — se fija en cada fetch dentro de rango válido
+  const [editModal, setEditModal] = useState(null);   // { viaje } — modal edición placa/rutas
+  const [editPlaca, setEditPlaca] = useState("");
+  const [editRutas, setEditRutas] = useState([]);     // array de strings
+  const [editRutaInput, setEditRutaInput] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editErr, setEditErr] = useState(""); // { label, fecha } — se fija en cada fetch dentro de rango válido
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadErr, setUploadErr] = useState("");
@@ -180,6 +185,59 @@ export default function App() {
     setLoginErr("");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) setLoginErr("Usuario o contraseña incorrectos");
+  }
+
+  function openEditModal(viaje) {
+    setEditModal(viaje);
+    setEditPlaca(viaje.placa || "");
+    // rutas viene como "GR001 | GR002 | GR003" → separar por " | "
+    const rutasArr = viaje.rutas ? viaje.rutas.split("|").map(r => r.trim()).filter(Boolean) : [];
+    setEditRutas(rutasArr);
+    setEditRutaInput("");
+    setEditErr("");
+  }
+
+  function addRuta() {
+    const val = editRutaInput.trim();
+    if (!val) return;
+    if (editRutas.includes(val)) { setEditErr("Esa ruta ya está en la lista."); return; }
+    setEditRutas(prev => [...prev, val]);
+    setEditRutaInput("");
+    setEditErr("");
+  }
+
+  function removeRuta(idx) {
+    setEditRutas(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  const PLACA_RE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
+
+  async function saveEdit() {
+    if (editPlaca && !PLACA_RE.test(editPlaca)) {
+      setEditErr("Formato de placa inválido. Usa el formato ABC-123.");
+      return;
+    }
+    setEditSaving(true);
+    setEditErr("");
+    try {
+      const rutasStr = editRutas.join(" | ");
+      const { error } = await supabase.from("viajes").update({
+        placa: editPlaca || null,
+        rutas: rutasStr || null,
+      }).eq("id_correlativo", editModal.id_correlativo);
+      if (error) throw error;
+      // Actualizar la fila en estado local sin refetch completo
+      setViajes(prev => prev.map(v =>
+        v.id_correlativo === editModal.id_correlativo
+          ? { ...v, placa: editPlaca || null, rutas: rutasStr || null }
+          : v
+      ));
+      setEditModal(null);
+    } catch (err) {
+      setEditErr(err.message || "Error al guardar.");
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   function openModal(viaje) {
@@ -375,14 +433,12 @@ export default function App() {
       {/* TABLE */}
       <div style={{ flex: 1, padding: "14px 18px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div style={{ overflowX: "auto", overflowY: "auto", flex: 1, background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
-          {dataLoading ? (
-            <div style={{ padding: 40, textAlign: "center", color: GRAY_500, fontSize: 13 }}>Cargando viajes...</div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
               <colgroup>
                 {COLS.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
-                <col style={{ width: 96 }} />
-                <col style={{ width: 96 }} />
+                <col style={{ width: 50 }} />  {/* Editar */}
+                <col style={{ width: 96 }} />  {/* Estado doc */}
+                <col style={{ width: 96 }} />  {/* Doc. adjuntos */}
               </colgroup>
               <thead>
                 <tr>
@@ -391,6 +447,9 @@ export default function App() {
                       {c.label}
                     </th>
                   ))}
+                  <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>
+                    {/* lápiz — sin label */}
+                  </th>
                   <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>
                     Estado doc
                   </th>
@@ -408,8 +467,8 @@ export default function App() {
                   const completo = nv > 0;
                   return (
                     <tr key={v.id_correlativo}
-                      onMouseEnter={e => e.currentTarget.querySelectorAll("td").forEach(td => { td.style.background = "#FFF5F5"; })}
-                      onMouseLeave={e => e.currentTarget.querySelectorAll("td").forEach(td => { td.style.background = "white"; })}>
+                      onMouseEnter={e => e.currentTarget.querySelectorAll("td").forEach(td => { if (td.dataset.editable) td.style.background = "#FFF5E8"; else td.style.background = "#FFF5F5"; })}
+                      onMouseLeave={e => e.currentTarget.querySelectorAll("td").forEach(td => { if (td.dataset.editable) td.style.background = "#FFFBF0"; else td.style.background = "white"; })}>
                       {COLS.map(c => {
                         let content;
                         if (c.key === "status") {
@@ -423,13 +482,25 @@ export default function App() {
                         } else {
                           content = v[c.key] || "—";
                         }
+                        const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                         return (
                           <td key={c.key} title={c.trunc ? (v[c.key] || "") : undefined}
-                            style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
+                            data-editable={editable ? "1" : undefined}
+                            style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900, background: editable ? "#FFFBF0" : undefined }}>
                             {content}
                           </td>
                         );
                       })}
+                      {/* Botón lápiz — solo visible para transportistas */}
+                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center", overflow: "hidden" }}>
+                        {!isAdmin && (
+                          <button onClick={() => openEditModal(v)}
+                            title="Editar Placa y Rutas/GR"
+                            style={{ width: 26, height: 26, borderRadius: "50%", border: `1px solid ${GRAY_200}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+                            ✏️
+                          </button>
+                        )}
+                      </td>
                       <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center", overflow: "hidden" }}>
                         <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 500, background: completo ? GREEN_LIGHT : RED_LIGHT, color: completo ? GREEN : RED }}>
                           {completo ? "Completo" : "Pendiente"}
@@ -454,14 +525,96 @@ export default function App() {
                 })}
               </tbody>
             </table>
-          )}
         </div>
         <div style={{ fontSize: 11, color: GRAY_500, marginTop: 8, textAlign: "right" }}>
           {viajes.length} viajes · {viajes.filter(v => (v.foto_versiones?.length || 0) > 0).length} con documento · {viajes.filter(v => !(v.foto_versiones?.length > 0)).length} pendientes
         </div>
       </div>
 
-      {/* MODAL */}
+      {/* MODAL EDICIÓN PLACA / RUTAS */}
+      {editModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && !editSaving && setEditModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Editar datos del viaje</div>
+              <button onClick={() => setEditModal(null)} disabled={editSaving}
+                style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18 }}>
+              {editModal.id_correlativo} · {editModal.cd_origen} → {editModal.cd_destino}
+            </div>
+
+            {/* Placa */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Placa</div>
+              <input
+                value={editPlaca}
+                onChange={e => { setEditPlaca(e.target.value.toUpperCase()); setEditErr(""); }}
+                placeholder="ABC-123"
+                maxLength={7}
+                style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }}
+              />
+              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Formato: 3 letras o números, guion, 3 letras o números. Ej: ABC-123</div>
+            </div>
+
+            {/* Rutas / GR */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Rutas / GR</div>
+
+              {/* Chips */}
+              {editRutas.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                  {editRutas.map((r, i) => (
+                    <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "#FFFBF0", border: `1px solid ${BORDER}`, borderRadius: 999, fontSize: 11, color: GRAY_900 }}>
+                      {r}
+                      <button onClick={() => removeRuta(i)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: GRAY_500, fontSize: 11, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Input + botón + */}
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  value={editRutaInput}
+                  onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
+                  onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addRuta())}
+                  placeholder="Ej: GR001234 o Ruta Trujillo"
+                  style={{ ...inp, flex: 1, background: "#FFFBF0", border: `1px solid ${BORDER}` }}
+                />
+                <button onClick={addRuta}
+                  style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${BORDER}`, background: "#FFFBF0", color: GRAY_900, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 400 }}>+</button>
+              </div>
+              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter o el botón + para agregar cada ruta o GR.</div>
+            </div>
+
+            {/* Error */}
+            {editErr && (
+              <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>
+                ⚠ {editErr}
+              </div>
+            )}
+
+            {/* Botones */}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setEditModal(null)} disabled={editSaving}
+                style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>
+                Cancelar
+              </button>
+              <button onClick={saveEdit} disabled={editSaving}
+                style={{ padding: "7px 16px", background: editSaving ? GRAY_200 : RED, color: editSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: editSaving ? "default" : "pointer" }}>
+                {editSaving ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SUBIDA DOC */}
       {modal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && setModal(null)}>
