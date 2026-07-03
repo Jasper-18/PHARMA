@@ -337,6 +337,12 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
+      <style>{`
+        .viaje-row td { background: white; transition: background 0.08s; }
+        .viaje-row td[data-editable] { background: #FFFBF0; }
+        .viaje-row:hover td { background: #FFF5F5; }
+        .viaje-row:hover td[data-editable] { background: #FFF0D6; }
+      `}</style>
 
       {/* TOPBAR */}
       <div style={{ height: 52, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 10, flexShrink: 0 }}>
@@ -467,9 +473,7 @@ export default function App() {
                   const nv = versiones.length;
                   const completo = nv > 0;
                   return (
-                    <tr key={v.id_correlativo}
-                      onMouseEnter={e => e.currentTarget.querySelectorAll("td").forEach(td => { if (td.dataset.editable) td.style.background = "#FFF5E8"; else td.style.background = "#FFF5F5"; })}
-                      onMouseLeave={e => e.currentTarget.querySelectorAll("td").forEach(td => { if (td.dataset.editable) td.style.background = "#FFFBF0"; else td.style.background = "white"; })}>
+                    <tr key={v.id_correlativo} className="viaje-row">
                       {COLS.map(c => {
                         let content;
                         if (c.key === "status") {
@@ -487,7 +491,7 @@ export default function App() {
                         return (
                           <td key={c.key} title={c.trunc ? (v[c.key] || "") : undefined}
                             data-editable={editable ? "1" : undefined}
-                            style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900, background: editable ? "#FFFBF0" : undefined }}>
+                            style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
                             {content}
                           </td>
                         );
@@ -497,8 +501,11 @@ export default function App() {
                         {!isAdmin && (
                           <button onClick={() => openEditModal(v)}
                             title="Editar Placa y Rutas/GR"
-                            style={{ width: 26, height: 26, borderRadius: "50%", border: `1px solid ${GRAY_200}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
-                            ✏️
+                            style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GRAY_900} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
                           </button>
                         )}
                       </td>
