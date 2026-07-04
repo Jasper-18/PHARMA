@@ -374,10 +374,24 @@ export default function App() {
     if (!val) return "";
     const d = new Date(val);
     if (isNaN(d)) return String(val);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd   = String(d.getDate()).padStart(2, "0");
+    const mm   = String(d.getMonth() + 1).padStart(2, "0");
     const aaaa = d.getFullYear();
     return `${dd}/${mm}/${aaaa}`;
+  };
+
+  const fmtFechaHora = (val) => {
+    if (!val) return "";
+    const d = new Date(val);
+    if (isNaN(d)) return String(val);
+    const dd   = String(d.getDate()).padStart(2, "0");
+    const mm   = String(d.getMonth() + 1).padStart(2, "0");
+    const aaaa = d.getFullYear();
+    let h = d.getHours();
+    const min  = String(d.getMinutes()).padStart(2, "0");
+    const ampm = h >= 12 ? "pm." : "am.";
+    h = h % 12 || 12; // sin cero inicial: 4 en vez de 04
+    return `${dd}/${mm}/${aaaa} ${h}:${min}${ampm}`;
   };
 
   function exportarExcel() {
@@ -413,6 +427,21 @@ export default function App() {
     XLSX.writeFile(wb, "viajes_adicionales.xlsx");
   }
 
+  async function abrirFoto(path) {
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) { alert("No se pudo obtener la URL de la foto."); return; }
+    window.open(data.signedUrl, "_blank");
+  }
+
+  async function descargarFoto(path, nombre) {
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) { alert("No se pudo obtener la URL de la foto."); return; }
+    const a = document.createElement("a");
+    a.href = data.signedUrl;
+    a.download = nombre || "documento.jpg";
+    a.click();
+  }
+
   function openModal(viaje) { setModal(viaje); setUploadFile(null); setUploadErr(""); setUploadSuccess(false); }
 
   function handleFileSelect(file) {
@@ -434,17 +463,17 @@ export default function App() {
       const path = `${modal.proveedor}/${modal.nro_spot}/${fileName}`;
       const { error: upErr } = await supabase.storage.from("documentos").upload(path, compressed, { upsert: true });
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from("documentos").getPublicUrl(path);
-      const nuevasVersiones = [...versiones, { v: nv, url: urlData?.publicUrl || path, nombre: fileName, subido_por: session.user.email, subido_en: new Date().toISOString() }];
+      // Bucket privado — guardar el path, la URL firmada se genera al momento de ver/descargar
+      const nuevasVersiones = [...versiones, { v: nv, path, nombre: fileName, subido_por: session.user.email, subido_en: new Date().toISOString() }];
       const ahora = new Date().toISOString();
       const { error: dbErr } = await supabase.from("viajes").update({
-        foto_versiones:   nuevasVersiones,
-        foto_url:         urlData?.publicUrl || path,
-        foto_nombre:      fileName,
-        subido_por:       session.user.email,
-        subido_en:        ahora,
+        foto_versiones:    nuevasVersiones,
+        foto_url:          path,           // guardamos el path, no URL pública
+        foto_nombre:       fileName,
+        subido_por:        session.user.email,
+        subido_en:         ahora,
         fecha_entrega_doc: versiones.length === 0 ? ahora : modal.fecha_entrega_doc,
-        estado_doc:       "Completo",
+        estado_doc:        "Completo",
       }).eq("nro_spot", modal.nro_spot);
       if (dbErr) throw dbErr;
       setUploadSuccess(true);
@@ -534,7 +563,7 @@ export default function App() {
       {/* TOPBAR */}
       <div style={{ height: 54, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 12, flexShrink: 0 }}>
         <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 7, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
-        <span style={{ fontSize: 18, fontWeight: 700, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
+        <span style={{ fontSize: 16, fontWeight: 700, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
@@ -697,9 +726,11 @@ export default function App() {
                         content = <Badge value={v[c.key]} />;
                       } else if (["estado_final","estado_ejecucion"].includes(c.key)) {
                         content = v[c.key]
-                          ? <span style={{ fontSize: 11, color: GRAY_900, fontWeight: 500 }}>{String(v[c.key]).toUpperCase()}</span>
+                          ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc" || c.key === "fecha_carga") {
+                      } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
+                        content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (c.key === "fecha_carga") {
                         content = v[c.key] ? fmtFecha(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (!content) {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
@@ -735,25 +766,25 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Botones ojo + descarga (visibles si hay foto) */}
+                    {/* Botones ojo + descarga — solo admin, solo si hay foto */}
                     <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
-                      {tieneUrl && (
+                      {isAdmin && completo && v.foto_url && (
                         <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                          <a href={v.foto_url} target="_blank" rel="noopener noreferrer" title="Ver foto"
-                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", color: GRAY_500 }}>
+                          <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
+                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                               <circle cx="12" cy="12" r="3"/>
                             </svg>
-                          </a>
-                          <a href={v.foto_url} download={v.foto_nombre || "documento"} title="Descargar foto"
-                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", color: GRAY_500 }}>
+                          </button>
+                          <button onClick={() => descargarFoto(v.foto_url, v.foto_nombre)} title="Descargar foto"
+                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                               <polyline points="7 10 12 15 17 10"/>
                               <line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                          </a>
+                          </button>
                         </div>
                       )}
                     </td>
