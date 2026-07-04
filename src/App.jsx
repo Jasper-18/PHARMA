@@ -98,7 +98,17 @@ export default function App() {
   const [fIdCorr, setFIdCorr] = useState("");
   const [fNroSpot, setFNroSpot] = useState("");
   const [fRutas, setFRutas] = useState("");
+  const [fPlaca, setFPlaca] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  // Draft filters — se aplican solo al presionar Buscar
+  const [dIdCorr, setDIdCorr] = useState("");
+  const [dNroSpot, setDNroSpot] = useState("");
+  const [dRutas, setDRutas] = useState("");
+  const [dPlaca, setDPlaca] = useState("");
+  const [dEstadoDoc, setDEstadoDoc] = useState("");
+  const [dDesde, setDDesde] = useState("");
+  const [dHasta, setDHasta] = useState("");
+  const [fechaErr, setFechaErr] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [modal, setModal] = useState(null);
   const [editModal, setEditModal] = useState(null);   // { viaje } — modal edición placa/rutas
@@ -143,6 +153,7 @@ export default function App() {
     if (filters.fNroSpot) q = q.ilike("nro_id_spot", `%${filters.fNroSpot}%`);
     if (filters.fRutas) q = q.ilike("rutas", `%${filters.fRutas}%`);
     if (filters.fIdCorr) q = q.ilike("id_correlativo", `%${filters.fIdCorr}%`);
+    if (filters.fPlaca) q = q.ilike("placa", `%${filters.fPlaca}%`);
     const { data } = await q;
     let rows = data || [];
     if (filters.fEstadoDoc === "Completo") rows = rows.filter(r => (r.foto_versiones?.length || 0) > 0);
@@ -178,8 +189,8 @@ export default function App() {
 
   // Actualiza los filtros en el ref sin disparar refetch
   useEffect(() => {
-    fetchViajesRef.current = { fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr };
-  }, [fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr]);
+    fetchViajesRef.current = { fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca };
+  }, [fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca]);
 
   async function doLogin(e) {
     e.preventDefault();
@@ -239,6 +250,42 @@ export default function App() {
     } finally {
       setEditSaving(false);
     }
+  }
+
+  function applyFilters() {
+    // Validar rango de fecha máximo 7 días
+    if (dDesde && dHasta) {
+      const diff = (new Date(dHasta) - new Date(dDesde)) / (1000 * 60 * 60 * 24);
+      if (diff < 0) { setFechaErr("La fecha 'Hasta' debe ser mayor o igual a 'Desde'."); return; }
+      if (diff > 7) { setFechaErr("El rango máximo permitido es de 7 días."); return; }
+    }
+    setFechaErr("");
+    setFIdCorr(dIdCorr);
+    setFNroSpot(dNroSpot);
+    setFRutas(dRutas);
+    setFPlaca(dPlaca);
+    setFEstadoDoc(dEstadoDoc);
+    setFDesde(dDesde);
+    setFHasta(dHasta);
+    // fetchViajes se dispara vía useEffect al cambiar los estados de filtro
+    setTimeout(() => fetchViajes(), 0);
+    setFilterOpen(false);
+  }
+
+  function clearFilters() {
+    setDIdCorr(""); setDNroSpot(""); setDRutas(""); setDPlaca("");
+    setDEstadoDoc(""); setDDesde(""); setDHasta(""); setFechaErr("");
+    setFIdCorr(""); setFNroSpot(""); setFRutas(""); setFPlaca("");
+    setFEstadoDoc(""); setFDesde(""); setFHasta("");
+    setTimeout(() => fetchViajes(), 0);
+  }
+
+  function openFilter() {
+    // Al abrir el drawer, sincronizar drafts con filtros activos
+    setDIdCorr(fIdCorr); setDNroSpot(fNroSpot); setDRutas(fRutas);
+    setDPlaca(fPlaca); setDEstadoDoc(fEstadoDoc);
+    setDDesde(fDesde); setDHasta(fHasta); setFechaErr("");
+    setFilterOpen(true);
   }
 
   function openModal(viaje) {
@@ -383,57 +430,124 @@ export default function App() {
 
       {/* TOOLBAR */}
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: GRAY_900, flex: 1 }}>{isAdmin ? "Todos los transportes" : empresa}</span>
-        <button onClick={() => { setFDesde(""); setFHasta(""); setFStatus(""); setFEstadoDoc(""); setFNroSpot(""); setFRutas(""); setFIdCorr(""); setFilterOpen(false); }}
+        <span style={{ fontSize: 14, fontWeight: 500, color: GRAY_900, flex: 1 }}>
+          {isAdmin ? "Todos los transportes" : empresa}
+          {(fIdCorr || fNroSpot || fRutas || fPlaca || fEstadoDoc || fDesde || fHasta) && (
+            <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, background: RED, color: "white", borderRadius: 999, padding: "2px 8px" }}>Filtros activos</span>
+          )}
+        </span>
+        <button onClick={clearFilters}
           style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }} title="Limpiar filtros">✕</button>
         <button onClick={fetchViajes}
           style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }} title="Actualizar">↻</button>
-        <button onClick={() => setFilterOpen(o => !o)}
+        <button onClick={openFilter}
           style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${filterOpen ? RED : BORDER}`, background: filterOpen ? RED : "white", color: filterOpen ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
           ⚙ Filtrar
         </button>
       </div>
 
-      {/* FILTER PANEL */}
+      {/* DRAWER LATERAL DE FILTROS */}
       {filterOpen && (
-        <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "12px 18px", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", flexShrink: 0 }}>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>ID Correlativo</div>
-            <input value={fIdCorr} onChange={e => setFIdCorr(e.target.value)} placeholder="Ej: 652" style={{ ...inp, minWidth: 120 }} />
+        <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={e => e.target === e.currentTarget && setFilterOpen(false)}>
+          {/* Overlay semitransparente */}
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.18)" }} onClick={() => setFilterOpen(false)} />
+          {/* Panel */}
+          <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 320, background: "white", boxShadow: "-4px 0 24px rgba(0,0,0,.12)", display: "flex", flexDirection: "column", zIndex: 41 }}
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header del drawer */}
+            <div style={{ padding: "18px 20px 14px", borderBottom: `0.5px solid ${BORDER}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: GRAY_900 }}>Opciones de Filtros</div>
+              <button onClick={() => setFilterOpen(false)}
+                style={{ width: 28, height: 28, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 14, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+
+            {/* Campos — scrolleable */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}
+              onKeyDown={e => e.key === "Enter" && applyFilters()}>
+
+              {/* ID Correlativo */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>ID Correlativo</div>
+                <input value={dIdCorr} onChange={e => setDIdCorr(e.target.value)}
+                  placeholder="Ej: INDU Nro784"
+                  style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+              </div>
+
+              {/* Nro SPOT */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Nro SPOT</div>
+                <input value={dNroSpot} onChange={e => setDNroSpot(e.target.value)}
+                  placeholder="Ej: Nro000004006780"
+                  style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+              </div>
+
+              {/* Rutas / GR */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Rutas / GR</div>
+                <input value={dRutas} onChange={e => setDRutas(e.target.value)}
+                  placeholder="Ej: GR001234"
+                  style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+              </div>
+
+              {/* Placa */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Placa</div>
+                <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())}
+                  placeholder="Ej: ABC-123"
+                  maxLength={7}
+                  style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
+              </div>
+
+              {/* Estado doc */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Estado doc</div>
+                <select value={dEstadoDoc} onChange={e => setDEstadoDoc(e.target.value)}
+                  style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
+                  <option value="">Todos</option>
+                  <option value="Completo">Completo</option>
+                  <option value="Pendiente">Pendiente</option>
+                </select>
+              </div>
+
+              {/* Rango de fecha */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
+                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 7 días</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4 }}>Desde</div>
+                    <input type="date" value={dDesde} onChange={e => { setDDesde(e.target.value); setFechaErr(""); }}
+                      style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4 }}>Hasta</div>
+                    <input type="date" value={dHasta} onChange={e => { setDHasta(e.target.value); setFechaErr(""); }}
+                      style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                {fechaErr && (
+                  <div style={{ marginTop: 8, padding: "7px 10px", background: RED_LIGHT, border: `0.5px solid #f7c1c1`, borderRadius: 7, fontSize: 11, color: RED_DARK }}>
+                    ⚠ {fechaErr}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer con botones */}
+            <div style={{ padding: "14px 20px", borderTop: `0.5px solid ${BORDER}`, display: "flex", gap: 8, flexShrink: 0 }}>
+              <button onClick={clearFilters}
+                style={{ flex: 1, padding: "9px 0", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500, fontWeight: 500 }}>
+                Limpiar
+              </button>
+              <button onClick={applyFilters}
+                style={{ flex: 2, padding: "9px 0", background: RED, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                Buscar
+              </button>
+            </div>
           </div>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>Nro SPOT</div>
-            <input value={fNroSpot} onChange={e => setFNroSpot(e.target.value)} placeholder="Ej: 4001234" style={{ ...inp, minWidth: 120 }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>Rutas / GR</div>
-            <input value={fRutas} onChange={e => setFRutas(e.target.value)} style={{ ...inp, minWidth: 140 }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>Desde</div>
-            <input type="date" value={fDesde} onChange={e => setFDesde(e.target.value)} style={inp} />
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>Hasta</div>
-            <input type="date" value={fHasta} onChange={e => setFHasta(e.target.value)} style={inp} />
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>Status viaje</div>
-            <select value={fStatus} onChange={e => setFStatus(e.target.value)} style={inp}>
-              <option value="">Todos</option>
-              <option>Realizado</option>
-              <option>No Ejecutado</option>
-            </select>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>Estado doc</div>
-            <select value={fEstadoDoc} onChange={e => setFEstadoDoc(e.target.value)} style={inp}>
-              <option value="">Todos</option>
-              <option value="Completo">Completo</option>
-              <option value="Pendiente">Pendiente</option>
-            </select>
-          </div>
-          <button onClick={fetchViajes} style={{ height: 34, padding: "0 18px", background: RED, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Aplicar</button>
         </div>
       )}
 
