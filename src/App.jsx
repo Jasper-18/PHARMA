@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
 
 const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZnVjY2lyYXVoZWtscHhhZ2dhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc0MzIsImV4cCI6MjA5ODEwMzQzMn0.MH8hJSktS_G3_omz9y48Vsp6PIlPcWdg6s6zdQtUNBo";
@@ -369,32 +370,47 @@ export default function App() {
     setFilterOpen(true);
   }
 
+  const fmtFecha = (val) => {
+    if (!val) return "";
+    const d = new Date(val);
+    if (isNaN(d)) return String(val);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const aaaa = d.getFullYear();
+    return `${dd}/${mm}/${aaaa}`;
+  };
+
   function exportarExcel() {
     if (!viajes.length) return;
     const colsExp = colsVisibles;
-    // Cabeceras
     const headers = colsExp.map(c => c.label);
-    // Filas
     const rows = viajes.map(v => colsExp.map(c => {
       const val = v[c.key];
       if (val === null || val === undefined) return "";
-      if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc")
-        return val ? new Date(val).toLocaleDateString("es-PE") : "";
+      if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc" || c.key === "fecha_carga")
+        return fmtFecha(val);
+      if (c.key === "estado_ejecucion" || c.key === "estado_final" || c.key === "resultado_ia" || c.key === "estado_validacion_ia")
+        return val ? String(val).toUpperCase() : "";
       if (c.key === "foto_versiones") return Array.isArray(val) ? val.length : 0;
       return String(val);
     }));
 
-    // Generar CSV con separador de tabulación para que Excel auto-ajuste columnas
-    const escape = v => `"${String(v).replace(/"/g, '""')}"`;
-    const lines = [headers.map(escape).join("\t"), ...rows.map(r => r.map(escape).join("\t"))];
-    const bom = "\uFEFF"; // BOM para que Excel detecte UTF-8
-    const blob = new Blob([bom + lines.join("\n")], { type: "text/tab-separated-values;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = "viajes_adicionales.xlsx";
-    a.click();
-    URL.revokeObjectURL(url);
+    const wsData = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Auto-ancho de columnas basado en el contenido más largo
+    const colWidths = headers.map((h, i) => {
+      const maxLen = Math.max(
+        h.length,
+        ...rows.map(r => String(r[i] || "").length)
+      );
+      return { wch: Math.min(maxLen + 2, 50) };
+    });
+    ws["!cols"] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Viajes");
+    XLSX.writeFile(wb, "viajes_adicionales.xlsx");
   }
 
   function openModal(viaje) { setModal(viaje); setUploadFile(null); setUploadErr(""); setUploadSuccess(false); }
@@ -518,7 +534,7 @@ export default function App() {
       {/* TOPBAR */}
       <div style={{ height: 54, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 12, flexShrink: 0 }}>
         <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 7, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
-        <span style={{ fontSize: 22, fontWeight: 700, color: "white", letterSpacing: "-.4px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
+        <span style={{ fontSize: 18, fontWeight: 700, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
@@ -564,8 +580,9 @@ export default function App() {
             <polyline points="7 10 12 15 17 10"/>
             <line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
-          Excel
+          Exportar
         </button>
+
         <button onClick={clearFilters} title="Limpiar filtros"
           style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         <button onClick={fetchViajes} title="Actualizar"
@@ -675,14 +692,15 @@ export default function App() {
                     {colsVisibles.map(c => {
                       const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                       let content = v[c.key];
-                      // Badge de semáforo solo para estado_final, resultado_ia, estado_validacion_ia, detalle_ia
-                      if (["estado_final","resultado_ia","estado_validacion_ia"].includes(c.key)) {
+                      // Solo resultado_ia y estado_validacion_ia conservan badge de color
+                      if (["resultado_ia","estado_validacion_ia"].includes(c.key)) {
                         content = <Badge value={v[c.key]} />;
-                      } else if (c.key === "estado_ejecucion") {
-                        // Texto plano en mayúsculas, sin colores
-                        content = v[c.key] ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span> : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
-                        content = v[c.key] ? new Date(v[c.key]).toLocaleDateString("es-PE") : <span style={{ color: GRAY_500 }}>—</span>;
+                      } else if (["estado_final","estado_ejecucion"].includes(c.key)) {
+                        content = v[c.key]
+                          ? <span style={{ fontSize: 11, color: GRAY_900, fontWeight: 500 }}>{String(v[c.key]).toUpperCase()}</span>
+                          : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc" || c.key === "fecha_carga") {
+                        content = v[c.key] ? fmtFecha(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (!content) {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
