@@ -209,9 +209,8 @@ export default function App() {
   const [dataLoading,  setDataLoading]  = useState(false);
 
   const _saved = (() => { try { return JSON.parse(sessionStorage.getItem("ps_filters") || "{}"); } catch { return {}; } })();
-  const _def7  = ultimos7Dias();
-  const [fDesde,    setFDesde]    = useState(_saved.fDesde    ?? _def7.desde);
-  const [fHasta,    setFHasta]    = useState(_saved.fHasta    ?? _def7.hasta);
+  const [fDesde,    setFDesde]    = useState(_saved.fDesde    ?? "");
+  const [fHasta,    setFHasta]    = useState(_saved.fHasta    ?? "");
   const [fEstadoDoc,setFEstadoDoc]= useState(_saved.fEstadoDoc ?? "");
   const [fNroSpot,  setFNroSpot]  = useState(_saved.fNroSpot  ?? "");
   const [fRutas,    setFRutas]    = useState(_saved.fRutas    ?? "");
@@ -258,6 +257,20 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Al recibir la sesión, si no hay fechas guardadas en sessionStorage,
+  // aplica el rango por defecto según el rol: 7 días para admin, 31 para transportista
+  useEffect(() => {
+    if (!session) return;
+    if (_saved.fDesde && _saved.fHasta) return; // ya hay filtros guardados, no pisar
+    const isAdminUser = session.user.user_metadata?.role === "admin";
+    const hoy = new Date();
+    const desde = new Date(hoy);
+    desde.setDate(hoy.getDate() - (isAdminUser ? 6 : 30));
+    const fmt = d => d.toISOString().slice(0, 10);
+    setFDesde(fmt(desde));
+    setFHasta(fmt(hoy));
+  }, [session]);
 
   useEffect(() => {
     const h = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
@@ -357,7 +370,11 @@ export default function App() {
   }
 
   function clearFilters() {
-    const d = ultimos7Dias();
+    const hoy = new Date();
+    const desde = new Date(hoy);
+    desde.setDate(hoy.getDate() - (isAdmin ? 6 : 30));
+    const fmt = d => d.toISOString().slice(0, 10);
+    const d = { desde: fmt(desde), hasta: fmt(hoy) };
     setDNroSpot(""); setDRutas(""); setDPlaca(""); setDEstadoDoc(""); setDEstFinal(""); setDProveedor("");
     setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
     setFNroSpot(""); setFRutas(""); setFPlaca(""); setFEstadoDoc(""); setFEstFinal(""); setFProveedor("");
