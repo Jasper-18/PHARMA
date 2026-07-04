@@ -177,9 +177,7 @@ function RangePicker({ desde, hasta, onChange }) {
         })}
       </div>
       <div style={{ marginTop: 10, padding: "6px 10px", background: GRAY_100, borderRadius: 7, fontSize: 11, color: GRAY_500, textAlign: "center" }}>
-        {rangoValido ? `${fmt(selStart)} – ${fmt(selEnd)}`
-          : selStart && !selEnd ? `Desde ${fmt(selStart)} — selecciona el día final (máx. 7 días)`
-          : "Selecciona el día de inicio"}
+        {rangoValido ? `${fmt(selStart)} – ${fmt(selEnd)}` : "Selecciona el rango de fechas"}
       </div>
     </div>
   );
@@ -219,6 +217,7 @@ export default function App() {
   const [fRutas,    setFRutas]    = useState(_saved.fRutas    ?? "");
   const [fPlaca,    setFPlaca]    = useState(_saved.fPlaca    ?? "");
   const [fEstFinal, setFEstFinal] = useState(_saved.fEstFinal ?? "");
+  const [fProveedor,setFProveedor]= useState(_saved.fProveedor ?? "");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [dNroSpot,   setDNroSpot]   = useState("");
@@ -226,6 +225,7 @@ export default function App() {
   const [dPlaca,     setDPlaca]     = useState("");
   const [dEstadoDoc, setDEstadoDoc] = useState("");
   const [dEstFinal,  setDEstFinal]  = useState("");
+  const [dProveedor, setDProveedor] = useState("");
   const [dDesde,     setDDesde]     = useState("");
   const [dHasta,     setDHasta]     = useState("");
   const [fechaErr,   setFechaErr]   = useState("");
@@ -273,6 +273,7 @@ export default function App() {
     const filters = fetchViajesRef.current || {};
     let q = supabase.from("viajes").select("*").order("fecha_carga", { ascending: false });
     if (!isAdmin && meta?.empresa_id) q = q.eq("proveedor", meta.empresa_id);
+    if (isAdmin && filters.fProveedor) q = q.eq("proveedor", filters.fProveedor);
     if (filters.fDesde)    q = q.gte("fecha_carga", filters.fDesde);
     if (filters.fHasta)    q = q.lte("fecha_carga", filters.fHasta);
     if (filters.fNroSpot)  q = q.ilike("nro_spot",  `%${filters.fNroSpot}%`);
@@ -295,11 +296,11 @@ export default function App() {
   useEffect(() => { if (session) fetchViajes(); }, [session]);
 
   useEffect(() => {
-    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal }));
-  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal]);
+    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor }));
+  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor]);
 
   useEffect(() => {
-    fetchViajesRef.current = { fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal };
+    fetchViajesRef.current = { fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor };
   }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal]);
 
   async function doLogin(e) {
@@ -348,7 +349,7 @@ export default function App() {
     }
     setFechaErr("");
     setFNroSpot(dNroSpot); setFRutas(dRutas); setFPlaca(dPlaca);
-    setFEstadoDoc(dEstadoDoc); setFEstFinal(dEstFinal);
+    setFEstadoDoc(dEstadoDoc); setFEstFinal(dEstFinal); setFProveedor(dProveedor);
     setFDesde(dDesde); setFHasta(dHasta);
     setTimeout(() => fetchViajes(), 0);
     setFilterOpen(false);
@@ -356,16 +357,16 @@ export default function App() {
 
   function clearFilters() {
     const d = ultimos7Dias();
-    setDNroSpot(""); setDRutas(""); setDPlaca(""); setDEstadoDoc(""); setDEstFinal("");
+    setDNroSpot(""); setDRutas(""); setDPlaca(""); setDEstadoDoc(""); setDEstFinal(""); setDProveedor("");
     setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
-    setFNroSpot(""); setFRutas(""); setFPlaca(""); setFEstadoDoc(""); setFEstFinal("");
+    setFNroSpot(""); setFRutas(""); setFPlaca(""); setFEstadoDoc(""); setFEstFinal(""); setFProveedor("");
     setFDesde(d.desde); setFHasta(d.hasta);
     setTimeout(() => fetchViajes(), 0);
   }
 
   function openFilter() {
     setDNroSpot(fNroSpot); setDRutas(fRutas); setDPlaca(fPlaca);
-    setDEstadoDoc(fEstadoDoc); setDEstFinal(fEstFinal);
+    setDEstadoDoc(fEstadoDoc); setDEstFinal(fEstFinal); setDProveedor(fProveedor);
     setDDesde(fDesde); setDHasta(fHasta); setFechaErr("");
     setFilterOpen(true);
   }
@@ -427,15 +428,34 @@ export default function App() {
     XLSX.writeFile(wb, "viajes_adicionales.xlsx");
   }
 
-  async function abrirFoto(path) {
-    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 60);
-    if (error || !data?.signedUrl) { alert("No se pudo obtener la URL de la foto."); return; }
+  async function abrirFoto(pathOrUrl) {
+    // Si viene una URL completa (datos viejos), extraer el path relativo
+    let path = pathOrUrl;
+    if (pathOrUrl && pathOrUrl.startsWith("http")) {
+      const match = pathOrUrl.match(/\/object\/(?:public|sign)\/documentos\/(.+?)(?:\?|$)/);
+      path = match ? decodeURIComponent(match[1]) : pathOrUrl;
+    }
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
+    if (error || !data?.signedUrl) {
+      console.error("Error signed URL:", error, "path:", path);
+      alert("No se pudo obtener la URL de la foto.");
+      return;
+    }
     window.open(data.signedUrl, "_blank");
   }
 
-  async function descargarFoto(path, nombre) {
-    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 60);
-    if (error || !data?.signedUrl) { alert("No se pudo obtener la URL de la foto."); return; }
+  async function descargarFoto(pathOrUrl, nombre) {
+    let path = pathOrUrl;
+    if (pathOrUrl && pathOrUrl.startsWith("http")) {
+      const match = pathOrUrl.match(/\/object\/(?:public|sign)\/documentos\/(.+?)(?:\?|$)/);
+      path = match ? decodeURIComponent(match[1]) : pathOrUrl;
+    }
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
+    if (error || !data?.signedUrl) {
+      console.error("Error signed URL:", error, "path:", path);
+      alert("No se pudo obtener la URL de la foto.");
+      return;
+    }
     const a = document.createElement("a");
     a.href = data.signedUrl;
     a.download = nombre || "documento.jpg";
@@ -595,7 +615,7 @@ export default function App() {
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, lineHeight: 1 }}>
-            {isAdmin ? "Todos los transportes" : `${empresa} — Seguimiento de Adicionales`}
+            {isAdmin ? "Seguimiento de Adicionales General" : `${empresa} — Seguimiento de Adicionales`}
           </span>
           {filtrosActivos && (
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
@@ -642,6 +662,17 @@ export default function App() {
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Ruta | N°GR | N°Carga</div>
                 <input value={dRutas} onChange={e => setDRutas(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
+              {isAdmin && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Transportista</div>
+                  <select value={dProveedor} onChange={e => setDProveedor(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
+                    <option value="">Todos</option>
+                    {["MLT","ANDI","TRANSA","JEDA","MUNDO","INDUAMERICA","LELY","RICPAL","HUAYRAZ","A&S","MAKOOL","BSC","E&S","RANSA"].map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>N° Placa</div>
                 <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())} maxLength={7} style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
@@ -655,7 +686,7 @@ export default function App() {
                 </select>
               </div>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Condición Final</div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Estado de Viaje Final</div>
                 <select value={dEstFinal} onChange={e => setDEstFinal(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
                   <option value="">Todos</option>
                   <option value="FINALIZADO">FINALIZADO</option>
@@ -705,7 +736,7 @@ export default function App() {
                   </th>
                 ))}
                 <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 272, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>{isAdmin ? "Foto" : ""}</th>
                 <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Estado doc</th>
                 <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>
               </tr>
@@ -864,21 +895,31 @@ export default function App() {
       {validModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && !validSaving && setValidModal(null)}>
-          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 400, maxWidth: "94vw" }}>
-            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Validar viaje manualmente</div>
-            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontFamily: "monospace" }}>{validModal.nro_spot}</div>
-            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18 }}>
-              {validModal.cd_origen} → {validModal.cd_destino} · {validModal.proveedor}
-            </div>
-            <div style={{ padding: "12px 14px", background: BLUE_LIGHT, borderRadius: 8, fontSize: 12, color: BLUE, marginBottom: 18, border: `0.5px solid #b3cfea` }}>
-              Al confirmar, el viaje quedará como <strong>FINALIZADO</strong> con resultado <strong>MANUAL</strong>. Esta acción queda registrada con tu usuario y la fecha actual.
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
+            {/* Header con ícono */}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 38, height: 38, borderRadius: "50%", background: BLUE_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={BLUE} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Aprobar Adicional</div>
+                <div style={{ fontSize: 12, color: GRAY_500 }}>
+                  ¿Estás seguro que desea confirmar la validación del viaje{" "}
+                  <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{validModal.nro_spot}</span>?
+                </div>
+              </div>
             </div>
             {validErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {validErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setValidModal(null)} disabled={validSaving} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
+              <button onClick={() => setValidModal(null)} disabled={validSaving}
+                style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>No</button>
               <button onClick={handleValidarManual} disabled={validSaving}
-                style={{ padding: "7px 16px", background: validSaving ? GRAY_200 : BLUE, color: validSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: validSaving ? "default" : "pointer" }}>
-                {validSaving ? "Validando..." : "Confirmar validación"}
+                style={{ padding: "7px 20px", background: validSaving ? GRAY_200 : BLUE, color: validSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: validSaving ? "default" : "pointer" }}>
+                {validSaving ? "Validando..." : "Sí"}
               </button>
             </div>
           </div>
