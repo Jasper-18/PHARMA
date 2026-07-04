@@ -10,6 +10,10 @@ const RED_DARK = "#A00D24";
 const RED_LIGHT = "#FCEBEB";
 const GREEN = "#0f6e56";
 const GREEN_LIGHT = "#e1f5ee";
+const AMBER = "#854f0b";
+const AMBER_LIGHT = "#faeeda";
+const BLUE = "#185fa5";
+const BLUE_LIGHT = "#e6f1fb";
 const GRAY_50 = "#F8F8F8";
 const GRAY_100 = "#F0EEEA";
 const GRAY_200 = "#D3D1C7";
@@ -18,40 +22,44 @@ const GRAY_900 = "#1a1a18";
 const BORDER = "#e5e2db";
 const MAX_MB = 10;
 
+// Orden de columnas según diseño acordado (posición 6 = Proveedor, solo visible para admin)
 const COLS = [
-  { key: "id_correlativo", label: "ID Correlativo", mono: true, width: 110 },
-  { key: "nro_id_spot", label: "Nro SPOT", width: 200 },
-  { key: "rutas", label: "Rutas / GR", trunc: true, width: 220 },
-  { key: "fecha_carga", label: "Fecha", width: 90 },
-  { key: "tipo_traslado", label: "Tipo", width: 60 },
-  { key: "tipo_oneway", label: "Modalidad", muted: true, width: 90 },
-  { key: "cd_origen", label: "Origen", width: 130 },
-  { key: "cd_destino", label: "Destino", width: 130 },
-  { key: "placa", label: "Placa", mono: true, width: 90 },
-  { key: "cantidad_paletas", label: "Paletas", right: true, width: 70 },
-  { key: "total_bultos", label: "Bultos", right: true, width: 70 },
-  { key: "hora_cita", label: "Hora cita", width: 80 },
-  { key: "observaciones", label: "Observaciones", trunc: true, muted: true, width: 160 },
-  { key: "centro_costo", label: "Centro costo", muted: true, width: 110 },
-  { key: "status", label: "Status viaje", width: 110 },
-  { key: "criterio_falla", label: "Criterio falla", trunc: true, muted: true, width: 110 },
-  { key: "spot", label: "Detalle de Servicio", trunc: true, width: 160 },
-  { key: "importe_servicio", label: "Importe S/", right: true, width: 90 },
-  { key: "validador_ejecucion", label: "Validador", muted: true, width: 90 },
-  { key: "proveedor", label: "Proveedor", width: 90 },
+  { key: "nro_spot",            label: "N° SPOT",             width: 210, mono: true },
+  { key: "fecha_carga",         label: "Fecha Carga",         width: 100 },
+  { key: "estado_final",        label: "Condición Final",     width: 120 },
+  { key: "placa",               label: "N° Placa",            width: 90,  mono: true },
+  { key: "rutas",               label: "Ruta|N°GR|N°Carga",  width: 220, trunc: true },
+  { key: "proveedor",           label: "Proveedor",           width: 110, adminOnly: true },
+  { key: "hora_cita",           label: "Hora Cita",           width: 80 },
+  { key: "cd_origen",           label: "Origen",              width: 130 },
+  { key: "cd_destino",          label: "Destino",             width: 130 },
+  { key: "tipo_traslado",       label: "Tipo de Envío",       width: 90 },
+  { key: "cantidad",            label: "Cantidad",            width: 80,  right: true },
+  { key: "area",                label: "Área",                width: 120 },
+  { key: "requerimiento",       label: "Requerimiento",       width: 160, trunc: true },
+  { key: "importe",             label: "Importe S/",          width: 90,  right: true },
+  { key: "centro_costo",        label: "Centro de Costo",     width: 110, muted: true },
+  { key: "detalle_servicio",    label: "Detalle del Servicio",width: 180, trunc: true },
+  { key: "estado_ejecucion",    label: "Estado Ejecución",    width: 120 },
+  { key: "estado_validacion_ia",label: "Validación IA",       width: 100 },
+  { key: "resultado_ia",        label: "Resultado IA",        width: 100 },
+  { key: "detalle_ia",          label: "Detalle IA",          width: 130, trunc: true },
+  { key: "usuario_modif",       label: "Usuario Modif.",      width: 140, muted: true },
+  { key: "fecha_modif",         label: "Fecha Modif.",        width: 130, muted: true },
+  { key: "fecha_entrega_doc",   label: "Fec. Entrega Doc.",   width: 130 },
 ];
 
-// Extrae el número final de un id_correlativo (ej: "RICPAL Nro4465" -> 4465)
-// para poder ordenar por ese número sin alterar el campo en la base de datos.
-function extraerNumeroId(id) {
-  if (!id) return -1;
-  const m = String(id).match(/(\d+)\s*$/);
-  return m ? parseInt(m[1], 10) : -1;
+// Extrae el segmento "Nro..." de un nro_spot para nombrar archivos
+// "Serv Adcional Nro000004006268" → "Nro000004006268"
+function extraerNroSpotCorto(nroSpot) {
+  if (!nroSpot) return "doc";
+  const m = String(nroSpot).match(/(Nro\d+)/i);
+  return m ? m[1] : nroSpot.replace(/\s+/g, "_").slice(0, 30);
 }
 
 async function comprimirImagen(file) {
   if (file.size > MAX_MB * 1024 * 1024) {
-    throw new Error(`El archivo supera los ${MAX_MB} MB. Por favor selecciona una imagen más pequeña.`);
+    throw new Error(`El archivo supera los ${MAX_MB} MB.`);
   }
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -82,7 +90,6 @@ async function comprimirImagen(file) {
   });
 }
 
-// Devuelve { desde, hasta } con los últimos 7 días en formato YYYY-MM-DD
 function ultimos7Dias() {
   const hoy = new Date();
   const desde = new Date(hoy);
@@ -92,30 +99,24 @@ function ultimos7Dias() {
 }
 
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-const DIAS_ES = ["D","L","M","X","J","V","S"];
+const DIAS_ES  = ["D","L","M","X","J","V","S"];
 
-// Calendario de rango inline — selección de inicio y fin en una sola vista
 function RangePicker({ desde, hasta, onChange }) {
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const parseFecha = s => s ? new Date(s + "T00:00:00") : null;
   const fmt = d => d ? d.toISOString().slice(0,10) : "";
-
-  const inicioMes = (() => {
-    const ref = parseFecha(desde) || hoy;
-    return new Date(ref.getFullYear(), ref.getMonth(), 1);
-  })();
+  const inicioMes = (() => { const ref = parseFecha(desde) || hoy; return new Date(ref.getFullYear(), ref.getMonth(), 1); })();
   const [mesVista, setMesVista] = useState(inicioMes);
   const [selStart, setSelStart] = useState(parseFecha(desde));
-  const [selEnd, setSelEnd] = useState(parseFecha(hasta));
-  const [hover, setHover] = useState(null);
+  const [selEnd,   setSelEnd]   = useState(parseFecha(hasta));
+  const [hover,    setHover]    = useState(null);
 
   const prevMes = () => setMesVista(m => new Date(m.getFullYear(), m.getMonth()-1, 1));
   const nextMes = () => setMesVista(m => new Date(m.getFullYear(), m.getMonth()+1, 1));
 
   const diasDelMes = () => {
     const dias = [];
-    const primero = new Date(mesVista.getFullYear(), mesVista.getMonth(), 1);
-    const inicio = primero.getDay(); // 0=dom
+    const inicio = new Date(mesVista.getFullYear(), mesVista.getMonth(), 1).getDay();
     for (let i = 0; i < inicio; i++) dias.push(null);
     const total = new Date(mesVista.getFullYear(), mesVista.getMonth()+1, 0).getDate();
     for (let d = 1; d <= total; d++) dias.push(new Date(mesVista.getFullYear(), mesVista.getMonth(), d));
@@ -124,34 +125,25 @@ function RangePicker({ desde, hasta, onChange }) {
 
   const handleDia = (dia) => {
     if (!dia) return;
-    if (!selStart || (selStart && selEnd)) {
-      setSelStart(dia); setSelEnd(null); setHover(null);
-    } else {
+    if (!selStart || (selStart && selEnd)) { setSelStart(dia); setSelEnd(null); setHover(null); }
+    else {
       if (dia < selStart) { setSelStart(dia); setSelEnd(null); }
       else {
-        const diff = (dia - selStart) / 86400000;
-        if (diff > 7) return; // bloquear más de 7 días
+        if ((dia - selStart) / 86400000 > 7) return;
         setSelEnd(dia);
         onChange({ desde: fmt(selStart), hasta: fmt(dia) });
       }
     }
   };
 
-  const enRango = (dia) => {
-    if (!dia) return false;
-    const end = selEnd || hover;
-    if (selStart && end) return dia >= selStart && dia <= end;
-    return false;
-  };
+  const enRango = (d) => { if (!d) return false; const end = selEnd || hover; return selStart && end && d >= selStart && d <= end; };
   const esStart = d => d && selStart && fmt(d) === fmt(selStart);
-  const esEnd = d => d && selEnd && fmt(d) === fmt(selEnd);
-  const esHoy = d => d && fmt(d) === fmt(hoy);
-
+  const esEnd   = d => d && selEnd   && fmt(d) === fmt(selEnd);
+  const esHoy   = d => d && fmt(d) === fmt(hoy);
   const rangoValido = selStart && selEnd && ((selEnd - selStart) / 86400000) <= 7;
 
   return (
     <div style={{ userSelect: "none" }}>
-      {/* Navegación mes */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <button onClick={prevMes} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: GRAY_500, padding: "2px 6px" }}>‹</button>
         <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em" }}>
@@ -159,96 +151,105 @@ function RangePicker({ desde, hasta, onChange }) {
         </div>
         <button onClick={nextMes} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: GRAY_500, padding: "2px 6px" }}>›</button>
       </div>
-      {/* Cabecera días */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
         {DIAS_ES.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, color: GRAY_500, fontWeight: 500, padding: "2px 0" }}>{d}</div>)}
       </div>
-      {/* Días */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px 0" }}>
         {diasDelMes().map((dia, i) => {
-          const enR = enRango(dia);
-          const isS = esStart(dia);
-          const isE = esEnd(dia);
-          const isH = esHoy(dia);
-          const seleccionando = selStart && !selEnd;
-          const sobreLimite = seleccionando && hover && dia && selStart && ((Math.abs(dia - selStart)) / 86400000) > 7;
+          const isS = esStart(dia), isE = esEnd(dia), isH = esHoy(dia), enR = enRango(dia);
+          const sobreLimite = selStart && !selEnd && hover && dia && (Math.abs(dia - selStart) / 86400000) > 7;
           return (
-            <div key={i}
-              onClick={() => handleDia(dia)}
-              onMouseEnter={() => { if (seleccionando && dia) setHover(dia); }}
+            <div key={i} onClick={() => handleDia(dia)}
+              onMouseEnter={() => { if (selStart && !selEnd && dia) setHover(dia); }}
               onMouseLeave={() => setHover(null)}
-              style={{
-                height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+              style={{ height: 32, display: "flex", alignItems: "center", justifyContent: "center",
                 cursor: dia ? "pointer" : "default",
                 background: (isS || isE) ? RED : enR ? "#FDDDE3" : "transparent",
-                borderRadius: isS ? "50% 0 0 50%" : isE ? "0 50% 50% 0" : (isS && isE) ? "50%" : 0,
+                borderRadius: isS ? "50% 0 0 50%" : isE ? "0 50% 50% 0" : 0,
                 color: (isS || isE) ? "white" : sobreLimite ? "#ccc" : isH ? RED : dia ? GRAY_900 : "transparent",
-                fontWeight: (isS || isE || isH) ? 600 : 400,
-                fontSize: 12,
-                outline: isH && !isS && !isE ? `1.5px solid ${RED}` : "none",
-                outlineOffset: -2,
-              }}>
+                fontWeight: (isS || isE || isH) ? 600 : 400, fontSize: 12,
+                outline: isH && !isS && !isE ? `1.5px solid ${RED}` : "none", outlineOffset: -2 }}>
               {dia ? dia.getDate() : ""}
             </div>
           );
         })}
       </div>
-      {/* Leyenda rango seleccionado */}
       <div style={{ marginTop: 10, padding: "6px 10px", background: GRAY_100, borderRadius: 7, fontSize: 11, color: GRAY_500, textAlign: "center" }}>
-        {rangoValido
-          ? `${fmt(selStart)} – ${fmt(selEnd)}`
-          : selStart && !selEnd
-            ? `Desde ${fmt(selStart)} — selecciona el día final (máx. 7 días)`
-            : "Selecciona el día de inicio"}
+        {rangoValido ? `${fmt(selStart)} – ${fmt(selEnd)}`
+          : selStart && !selEnd ? `Desde ${fmt(selStart)} — selecciona el día final (máx. 7 días)`
+          : "Selecciona el día de inicio"}
       </div>
     </div>
   );
 }
 
+// Badge coloreado para campos de estado
+function Badge({ value }) {
+  if (!value) return <span style={{ color: GRAY_500 }}>—</span>;
+  const v = value.toUpperCase();
+  let bg = GRAY_100, color = GRAY_500;
+  if (v === "FINALIZADO" || v === "OK" || v === "TERMINADO" || v === "EJECUTADO" || v === "CORRECTO") { bg = GREEN_LIGHT; color = GREEN; }
+  else if (v === "PENDIENTE" || v === "NO EJECUTADO") { bg = AMBER_LIGHT; color = AMBER; }
+  else if (v === "MANUAL") { bg = BLUE_LIGHT; color = BLUE; }
+  else if (v === "BORROSO" || v === "NO COINCIDE") { bg = RED_LIGHT; color = RED_DARK; }
+  return (
+    <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" }}>
+      {value}
+    </span>
+  );
+}
+
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginErr, setLoginErr] = useState("");
-  const [viajes, setViajes] = useState([]);
-  const [dataLoading, setDataLoading] = useState(false);
-  // Lee filtros guardados en sessionStorage, o usa últimos 7 días por defecto
+  const [session,      setSession]      = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [email,        setEmail]        = useState("");
+  const [password,     setPassword]     = useState("");
+  const [loginErr,     setLoginErr]     = useState("");
+  const [viajes,       setViajes]       = useState([]);
+  const [dataLoading,  setDataLoading]  = useState(false);
+
   const _saved = (() => { try { return JSON.parse(sessionStorage.getItem("ps_filters") || "{}"); } catch { return {}; } })();
-  const _def7 = ultimos7Dias();
-  const [fDesde, setFDesde] = useState(_saved.fDesde ?? _def7.desde);
-  const [fHasta, setFHasta] = useState(_saved.fHasta ?? _def7.hasta);
-  const [fStatus, setFStatus] = useState(_saved.fStatus ?? "");
-  const [fEstadoDoc, setFEstadoDoc] = useState(_saved.fEstadoDoc ?? "");
-  const [fIdCorr, setFIdCorr] = useState(_saved.fIdCorr ?? "");
-  const [fNroSpot, setFNroSpot] = useState(_saved.fNroSpot ?? "");
-  const [fRutas, setFRutas] = useState(_saved.fRutas ?? "");
-  const [fPlaca, setFPlaca] = useState(_saved.fPlaca ?? "");
+  const _def7  = ultimos7Dias();
+  const [fDesde,    setFDesde]    = useState(_saved.fDesde    ?? _def7.desde);
+  const [fHasta,    setFHasta]    = useState(_saved.fHasta    ?? _def7.hasta);
+  const [fEstadoDoc,setFEstadoDoc]= useState(_saved.fEstadoDoc ?? "");
+  const [fNroSpot,  setFNroSpot]  = useState(_saved.fNroSpot  ?? "");
+  const [fRutas,    setFRutas]    = useState(_saved.fRutas    ?? "");
+  const [fPlaca,    setFPlaca]    = useState(_saved.fPlaca    ?? "");
+  const [fEstFinal, setFEstFinal] = useState(_saved.fEstFinal ?? "");
+
   const [filterOpen, setFilterOpen] = useState(false);
-  // Draft filters — se aplican solo al presionar Buscar
-  const [dIdCorr, setDIdCorr] = useState("");
-  const [dNroSpot, setDNroSpot] = useState("");
-  const [dRutas, setDRutas] = useState("");
-  const [dPlaca, setDPlaca] = useState("");
+  const [dNroSpot,   setDNroSpot]   = useState("");
+  const [dRutas,     setDRutas]     = useState("");
+  const [dPlaca,     setDPlaca]     = useState("");
   const [dEstadoDoc, setDEstadoDoc] = useState("");
-  const [dDesde, setDDesde] = useState("");
-  const [dHasta, setDHasta] = useState("");
-  const [fechaErr, setFechaErr] = useState("");
+  const [dEstFinal,  setDEstFinal]  = useState("");
+  const [dDesde,     setDDesde]     = useState("");
+  const [dHasta,     setDHasta]     = useState("");
+  const [fechaErr,   setFechaErr]   = useState("");
+
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [modal, setModal] = useState(null);
-  const [editModal, setEditModal] = useState(null);   // { viaje } — modal edición placa/rutas
-  const [editPlaca, setEditPlaca] = useState("");
-  const [editRutas, setEditRutas] = useState([]);     // array de strings
-  const [editRutaInput, setEditRutaInput] = useState("");
-  const [editSaving, setEditSaving] = useState(false);
-  const [editErr, setEditErr] = useState("");
-  const [corteInfo, setCorteInfo] = useState(null); // se fija en cada fetch dentro de rango válido
-  const [uploading, setUploading] = useState(false);
-  const [uploadFile, setUploadFile] = useState(null);
-  const [uploadErr, setUploadErr] = useState("");
-  const [uploadSuccess, setUploadSuccess] = useState(false);
-  const fileRef = useRef();
-  const userMenuRef = useRef();
+  const [modal,        setModal]        = useState(null);
+  const [editModal,    setEditModal]    = useState(null);
+  const [editPlaca,    setEditPlaca]    = useState("");
+  const [editRutas,    setEditRutas]    = useState([]);
+  const [editRutaInput,setEditRutaInput]= useState("");
+  const [editSaving,   setEditSaving]   = useState(false);
+  const [editErr,      setEditErr]      = useState("");
+  const [corteInfo,    setCorteInfo]    = useState(null);
+  const [uploading,    setUploading]    = useState(false);
+  const [uploadFile,   setUploadFile]   = useState(null);
+  const [uploadErr,    setUploadErr]    = useState("");
+  const [uploadSuccess,setUploadSuccess]= useState(false);
+
+  // Estado modal validación admin
+  const [validModal,   setValidModal]   = useState(null);
+  const [validSaving,  setValidSaving]  = useState(false);
+  const [validErr,     setValidErr]     = useState("");
+
+  const fileRef    = useRef();
+  const userMenuRef= useRef();
+  const fetchViajesRef = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); });
@@ -257,12 +258,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handleClick = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    const h = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, []);
-
-  const fetchViajesRef = useRef(null);
 
   const fetchViajes = useCallback(async () => {
     if (!session) return;
@@ -271,56 +270,35 @@ export default function App() {
     const isAdmin = meta?.role === "admin";
     const filters = fetchViajesRef.current || {};
     let q = supabase.from("viajes").select("*").order("fecha_carga", { ascending: false });
-    if (!isAdmin && meta?.empresa_id) q = q.eq("empresa_id", meta.empresa_id);
-    if (filters.fDesde) q = q.gte("fecha_carga", filters.fDesde);
-    if (filters.fHasta) q = q.lte("fecha_carga", filters.fHasta);
-    if (filters.fStatus) q = q.ilike("status", `%${filters.fStatus}%`);
-    if (filters.fNroSpot) q = q.ilike("nro_id_spot", `%${filters.fNroSpot}%`);
-    if (filters.fRutas) q = q.ilike("rutas", `%${filters.fRutas}%`);
-    if (filters.fIdCorr) q = q.ilike("id_correlativo", `%${filters.fIdCorr}%`);
-    if (filters.fPlaca) q = q.ilike("placa", `%${filters.fPlaca}%`);
+    if (!isAdmin && meta?.empresa_id) q = q.eq("proveedor", meta.empresa_id);
+    if (filters.fDesde)    q = q.gte("fecha_carga", filters.fDesde);
+    if (filters.fHasta)    q = q.lte("fecha_carga", filters.fHasta);
+    if (filters.fNroSpot)  q = q.ilike("nro_spot",  `%${filters.fNroSpot}%`);
+    if (filters.fRutas)    q = q.ilike("rutas",      `%${filters.fRutas}%`);
+    if (filters.fPlaca)    q = q.ilike("placa",      `%${filters.fPlaca}%`);
+    if (filters.fEstFinal) q = q.eq("estado_final",   filters.fEstFinal);
     const { data } = await q;
     let rows = data || [];
     if (filters.fEstadoDoc === "Completo") rows = rows.filter(r => (r.foto_versiones?.length || 0) > 0);
     if (filters.fEstadoDoc === "Pendiente") rows = rows.filter(r => !(r.foto_versiones?.length > 0));
-
-    // Orden de filas: fecha_carga desc (ya viene de Supabase) + desempate secundario
-    // por los dígitos finales del id_correlativo (desc), solo para la vista —
-    // no modifica nada en la base de datos.
-    rows = [...rows].sort((a, b) => {
-      if (a.fecha_carga !== b.fecha_carga) return 0; // respeta el orden por fecha que ya trajo Supabase
-      return extraerNumeroId(b.id_correlativo) - extraerNumeroId(a.id_correlativo);
-    });
-
     setViajes(rows);
     setDataLoading(false);
-
-    // Corte: se fija según la hora REAL en que se hizo este fetch, no en cada render.
-    // 8:00am-10:00am -> "8:30 am" fijo. 4:00pm-7:00pm -> "4:00 pm" fijo.
-    // Fuera de esos rangos: se deja el último corte calculado, sin cambiarlo.
     const ahora = new Date();
-    const hora = ahora.getHours() + ahora.getMinutes() / 60;
+    const hora  = ahora.getHours() + ahora.getMinutes() / 60;
     const fechaStr = ahora.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
-    if (hora >= 8 && hora < 10) {
-      setCorteInfo({ label: `${fechaStr} · 8:30 am` });
-    } else if (hora >= 16 && hora < 19) {
-      setCorteInfo({ label: `${fechaStr} · 4:00 pm` });
-    }
-    // si está fuera de rango, no se toca corteInfo (queda el último valor)
+    if (hora >= 8  && hora < 10) setCorteInfo({ label: `${fechaStr} · 8:30 am` });
+    else if (hora >= 16 && hora < 19) setCorteInfo({ label: `${fechaStr} · 4:00 pm` });
   }, [session]);
 
-  // Solo carga al iniciar sesión — no refresca al cambiar de pestaña
   useEffect(() => { if (session) fetchViajes(); }, [session]);
 
-  // Persistir filtros activos en sessionStorage
   useEffect(() => {
-    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca }));
-  }, [fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca]);
+    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal }));
+  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal]);
 
-  // Actualiza los filtros en el ref sin disparar refetch
   useEffect(() => {
-    fetchViajesRef.current = { fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca };
-  }, [fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca]);
+    fetchViajesRef.current = { fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal };
+  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal]);
 
   async function doLogin(e) {
     e.preventDefault();
@@ -332,160 +310,145 @@ export default function App() {
   function openEditModal(viaje) {
     setEditModal(viaje);
     setEditPlaca(viaje.placa || "");
-    // rutas viene como "GR001 | GR002 | GR003" → separar por " | "
-    const rutasArr = viaje.rutas ? viaje.rutas.split("|").map(r => r.trim()).filter(Boolean) : [];
-    setEditRutas(rutasArr);
-    setEditRutaInput("");
-    setEditErr("");
+    setEditRutas(viaje.rutas ? viaje.rutas.split("|").map(r => r.trim()).filter(Boolean) : []);
+    setEditRutaInput(""); setEditErr("");
   }
 
   function addRuta() {
     const val = editRutaInput.trim();
     if (!val) return;
     if (editRutas.includes(val)) { setEditErr("Esa ruta ya está en la lista."); return; }
-    setEditRutas(prev => [...prev, val]);
-    setEditRutaInput("");
-    setEditErr("");
+    setEditRutas(prev => [...prev, val]); setEditRutaInput(""); setEditErr("");
   }
 
-  function removeRuta(idx) {
-    setEditRutas(prev => prev.filter((_, i) => i !== idx));
-  }
+  function removeRuta(idx) { setEditRutas(prev => prev.filter((_, i) => i !== idx)); }
 
   const PLACA_RE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
 
   async function saveEdit() {
-    if (editPlaca && !PLACA_RE.test(editPlaca)) {
-      setEditErr("Formato de placa inválido. Usa el formato ABC-123.");
-      return;
-    }
-    setEditSaving(true);
-    setEditErr("");
+    if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido. Usa ABC-123."); return; }
+    setEditSaving(true); setEditErr("");
     try {
       const rutasStr = editRutas.join(" | ");
-      const { error } = await supabase.from("viajes").update({
-        placa: editPlaca || null,
-        rutas: rutasStr || null,
-      }).eq("id_correlativo", editModal.id_correlativo);
+      const { error } = await supabase.from("viajes").update({ placa: editPlaca || null, rutas: rutasStr || null }).eq("nro_spot", editModal.nro_spot);
       if (error) throw error;
-      // Actualizar la fila en estado local sin refetch completo
-      setViajes(prev => prev.map(v =>
-        v.id_correlativo === editModal.id_correlativo
-          ? { ...v, placa: editPlaca || null, rutas: rutasStr || null }
-          : v
-      ));
+      setViajes(prev => prev.map(v => v.nro_spot === editModal.nro_spot ? { ...v, placa: editPlaca || null, rutas: rutasStr || null } : v));
       setEditModal(null);
-    } catch (err) {
-      setEditErr(err.message || "Error al guardar.");
-    } finally {
-      setEditSaving(false);
-    }
+    } catch (err) { setEditErr(err.message || "Error al guardar."); }
+    finally { setEditSaving(false); }
   }
 
   function applyFilters() {
-    // Validar rango de fecha máximo 7 días
     if (dDesde && dHasta) {
       const diff = (new Date(dHasta) - new Date(dDesde)) / (1000 * 60 * 60 * 24);
       if (diff < 0) { setFechaErr("La fecha 'Hasta' debe ser mayor o igual a 'Desde'."); return; }
       if (diff > 7) { setFechaErr("El rango máximo permitido es de 7 días."); return; }
     }
     setFechaErr("");
-    setFIdCorr(dIdCorr);
-    setFNroSpot(dNroSpot);
-    setFRutas(dRutas);
-    setFPlaca(dPlaca);
-    setFEstadoDoc(dEstadoDoc);
-    setFDesde(dDesde);
-    setFHasta(dHasta);
-    // fetchViajes se dispara vía useEffect al cambiar los estados de filtro
+    setFNroSpot(dNroSpot); setFRutas(dRutas); setFPlaca(dPlaca);
+    setFEstadoDoc(dEstadoDoc); setFEstFinal(dEstFinal);
+    setFDesde(dDesde); setFHasta(dHasta);
     setTimeout(() => fetchViajes(), 0);
     setFilterOpen(false);
   }
 
   function clearFilters() {
     const d = ultimos7Dias();
-    setDIdCorr(""); setDNroSpot(""); setDRutas(""); setDPlaca("");
-    setDEstadoDoc(""); setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
-    setFIdCorr(""); setFNroSpot(""); setFRutas(""); setFPlaca("");
-    setFEstadoDoc(""); setFDesde(d.desde); setFHasta(d.hasta);
+    setDNroSpot(""); setDRutas(""); setDPlaca(""); setDEstadoDoc(""); setDEstFinal("");
+    setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
+    setFNroSpot(""); setFRutas(""); setFPlaca(""); setFEstadoDoc(""); setFEstFinal("");
+    setFDesde(d.desde); setFHasta(d.hasta);
     setTimeout(() => fetchViajes(), 0);
   }
 
   function openFilter() {
-    // Al abrir el drawer, sincronizar drafts con filtros activos
-    setDIdCorr(fIdCorr); setDNroSpot(fNroSpot); setDRutas(fRutas);
-    setDPlaca(fPlaca); setDEstadoDoc(fEstadoDoc);
+    setDNroSpot(fNroSpot); setDRutas(fRutas); setDPlaca(fPlaca);
+    setDEstadoDoc(fEstadoDoc); setDEstFinal(fEstFinal);
     setDDesde(fDesde); setDHasta(fHasta); setFechaErr("");
     setFilterOpen(true);
   }
 
-  function openModal(viaje) {
-    setModal(viaje);
-    setUploadFile(null);
-    setUploadErr("");
-    setUploadSuccess(false);
-  }
+  function openModal(viaje) { setModal(viaje); setUploadFile(null); setUploadErr(""); setUploadSuccess(false); }
 
   function handleFileSelect(file) {
     if (!file) return;
-    if (file.size > MAX_MB * 1024 * 1024) {
-      setUploadErr(`El archivo supera los ${MAX_MB} MB. Selecciona una imagen más pequeña.`);
-      setUploadFile(null);
-      return;
-    }
-    setUploadErr("");
-    setUploadFile(file);
+    if (file.size > MAX_MB * 1024 * 1024) { setUploadErr(`El archivo supera los ${MAX_MB} MB.`); setUploadFile(null); return; }
+    setUploadErr(""); setUploadFile(file);
   }
 
   async function handleUpload() {
     if (!uploadFile || !modal) return;
-    setUploading(true);
-    setUploadErr("");
+    setUploading(true); setUploadErr("");
     try {
       const compressed = await comprimirImagen(uploadFile);
-      const versiones = modal.foto_versiones || [];
-      const nv = versiones.length + 1;
+      const versiones  = modal.foto_versiones || [];
+      const nv  = versiones.length + 1;
       const ext = compressed.name.split(".").pop();
-      const path = `${modal.empresa_id}/${modal.id_correlativo}/foto_v${nv}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("evidencias").upload(path, compressed, { upsert: true });
+      const nroCorto = extraerNroSpotCorto(modal.nro_spot);
+      const fileName = `${nroCorto}_v${nv}.${ext}`;
+      const path = `${modal.proveedor}/${modal.nro_spot}/${fileName}`;
+      const { error: upErr } = await supabase.storage.from("documentos").upload(path, compressed, { upsert: true });
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from("evidencias").getPublicUrl(path);
-      const nuevasVersiones = [...versiones, { v: nv, url: urlData?.publicUrl || path, nombre: `foto_v${nv}.${ext}`, subido_por: session.user.email, subido_en: new Date().toISOString() }];
+      const { data: urlData } = supabase.storage.from("documentos").getPublicUrl(path);
+      const nuevasVersiones = [...versiones, { v: nv, url: urlData?.publicUrl || path, nombre: fileName, subido_por: session.user.email, subido_en: new Date().toISOString() }];
+      const ahora = new Date().toISOString();
       const { error: dbErr } = await supabase.from("viajes").update({
-        foto_versiones: nuevasVersiones,
-        foto_url: urlData?.publicUrl || path,
-        foto_nombre: `foto_v${nv}.${ext}`,
-        subido_por: session.user.email,
-        subido_en: new Date().toISOString(),
-      }).eq("id_correlativo", modal.id_correlativo);
+        foto_versiones:   nuevasVersiones,
+        foto_url:         urlData?.publicUrl || path,
+        foto_nombre:      fileName,
+        subido_por:       session.user.email,
+        subido_en:        ahora,
+        fecha_entrega_doc: versiones.length === 0 ? ahora : modal.fecha_entrega_doc,
+        estado_doc:       "Completo",
+      }).eq("nro_spot", modal.nro_spot);
       if (dbErr) throw dbErr;
       setUploadSuccess(true);
       fetchViajes();
       setTimeout(() => setModal(null), 1600);
-    } catch (err) {
-      setUploadErr(err.message || "Error al subir el archivo.");
-    } finally {
-      setUploading(false);
-    }
+    } catch (err) { setUploadErr(err.message || "Error al subir el archivo."); }
+    finally { setUploading(false); }
   }
 
-  const meta = session?.user?.user_metadata;
+  // Validación manual por admin
+  async function handleValidarManual() {
+    if (!validModal) return;
+    setValidSaving(true); setValidErr("");
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase.from("viajes").update({
+        resultado_ia:        "MANUAL",
+        estado_validacion_ia:"TERMINADO",
+        detalle_ia:          "Correcto",
+        estado_final:        "FINALIZADO",
+        usuario_modif:       session.user.email,
+        fecha_modif:         ahora,
+      }).eq("nro_spot", validModal.nro_spot);
+      if (error) throw error;
+      setViajes(prev => prev.map(v => v.nro_spot === validModal.nro_spot
+        ? { ...v, resultado_ia: "MANUAL", estado_validacion_ia: "TERMINADO", detalle_ia: "Correcto", estado_final: "FINALIZADO", usuario_modif: session.user.email, fecha_modif: ahora }
+        : v));
+      setValidModal(null);
+    } catch (err) { setValidErr(err.message || "Error al validar."); }
+    finally { setValidSaving(false); }
+  }
+
+  const meta    = session?.user?.user_metadata;
   const isAdmin = meta?.role === "admin";
   const empresa = meta?.empresa_id || "";
-  const initials = (session?.user?.email || "U").substring(0, 2).toUpperCase();
-  const inp = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
+  const initials= (session?.user?.email || "U").substring(0, 2).toUpperCase();
+  const inp     = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
 
-  // Corte: se muestra el último corte fijado por fetchViajes (hora real de actualización).
-  // Antes del primer fetch, se calcula un valor inicial razonable como placeholder.
   let corteLabel = corteInfo?.label;
   if (!corteLabel) {
     const ahora = new Date();
-    const hora = ahora.getHours() + ahora.getMinutes() / 60;
-    const fechaCorte = new Date(ahora);
-    if (hora < 8) fechaCorte.setDate(fechaCorte.getDate() - 1);
-    const fechaCorteStr = fechaCorte.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
-    corteLabel = (hora >= 8 && hora < 16.5) ? `${fechaCorteStr} · 8:00 am` : `${fechaCorteStr} · 4:30 pm`;
+    const hora  = ahora.getHours() + ahora.getMinutes() / 60;
+    const fCorte = new Date(ahora);
+    if (hora < 8) fCorte.setDate(fCorte.getDate() - 1);
+    const fs = fCorte.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    corteLabel = (hora >= 8 && hora < 16.5) ? `${fs} · 8:00 am` : `${fs} · 4:30 pm`;
   }
+
+  const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal;
 
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><p style={{ color: GRAY_500, fontSize: 13 }}>Cargando...</p></div>;
 
@@ -513,6 +476,9 @@ export default function App() {
     </div>
   );
 
+  // Columnas visibles según rol
+  const colsVisibles = COLS.filter(c => !c.adminOnly || isAdmin);
+
   return (
     <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
       <style>{`
@@ -529,32 +495,28 @@ export default function App() {
         <div style={{ width: 1, height: 18, background: "rgba(255,255,255,.25)" }} />
         <span style={{ fontSize: 13, color: "rgba(255,255,255,.75)", fontWeight: 400 }}>Seguimiento Adicionales</span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Tarjeta de corte */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
-            <div>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,.6)", textTransform: "uppercase", letterSpacing: ".05em" }}>Último corte</div>
-              <div style={{ fontSize: 11, color: "white", fontWeight: 500 }}>{corteLabel}</div>
-            </div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,.6)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 500 }}>Último Corte</div>
+            <div style={{ fontSize: 11, color: "white", fontWeight: 500 }}>{corteLabel}</div>
           </div>
-          {/* Menú usuario */}
-          <div style={{ position: "relative" }} ref={userMenuRef}>
-          <button onClick={() => setUserMenuOpen(o => !o)}
-            style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,.2)", border: "1.5px solid rgba(255,255,255,.35)", color: "white", fontSize: 12, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {initials}
-          </button>
-          {userMenuOpen && (
-            <div style={{ position: "absolute", right: 0, top: 42, background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 10, minWidth: 210, zIndex: 50, boxShadow: "0 4px 16px rgba(0,0,0,.1)" }}>
-              <div style={{ padding: "10px 14px", borderBottom: `0.5px solid ${BORDER}` }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: GRAY_900 }}>{session.user.email}</div>
-                <div style={{ fontSize: 11, color: GRAY_500, marginTop: 2 }}>{isAdmin ? "Administrador" : `${empresa} · Transportista`}</div>
+          <div ref={userMenuRef} style={{ position: "relative" }}>
+            <button onClick={() => setUserMenuOpen(o => !o)}
+              style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,.2)", border: "1.5px solid rgba(255,255,255,.35)", color: "white", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {initials}
+            </button>
+            {userMenuOpen && (
+              <div style={{ position: "absolute", top: 38, right: 0, background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}`, minWidth: 200, padding: "8px 0", zIndex: 30, boxShadow: "0 4px 20px rgba(0,0,0,.1)" }}>
+                <div style={{ padding: "6px 14px 10px", borderBottom: `0.5px solid ${BORDER}` }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: GRAY_900 }}>{session.user.email}</div>
+                  <div style={{ fontSize: 10, color: GRAY_500, marginTop: 2 }}>{isAdmin ? "Administrador" : empresa}</div>
+                </div>
+                <button onClick={() => supabase.auth.signOut()}
+                  style={{ width: "100%", padding: "8px 14px", background: "none", border: "none", textAlign: "left", fontSize: 12, color: RED, cursor: "pointer" }}>
+                  Cerrar sesión
+                </button>
               </div>
-              <button onClick={() => supabase.auth.signOut()}
-                style={{ width: "100%", padding: "9px 14px", textAlign: "left", fontSize: 12, color: RED, cursor: "pointer", background: "none", border: "none" }}>
-                Cerrar sesión
-              </button>
-            </div>
-          )}
+            )}
           </div>
         </div>
       </div>
@@ -563,95 +525,66 @@ export default function App() {
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <span style={{ fontSize: 14, fontWeight: 500, color: GRAY_900, flex: 1 }}>
           {isAdmin ? "Todos los transportes" : empresa}
-          {(fIdCorr || fNroSpot || fRutas || fPlaca || fEstadoDoc || fDesde || fHasta) && (
+          {filtrosActivos && (
             <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, background: RED, color: "white", borderRadius: 999, padding: "2px 8px" }}>Filtros activos</span>
           )}
         </span>
-        <button onClick={clearFilters}
-          style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }} title="Limpiar filtros">✕</button>
-        <button onClick={fetchViajes}
-          style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }} title="Actualizar">↻</button>
+        <button onClick={clearFilters} title="Limpiar filtros"
+          style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        <button onClick={fetchViajes} title="Actualizar"
+          style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>↻</button>
         <button onClick={openFilter}
           style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${filterOpen ? RED : BORDER}`, background: filterOpen ? RED : "white", color: filterOpen ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
           ⚙ Filtrar
         </button>
       </div>
 
-      {/* DRAWER LATERAL DE FILTROS */}
+      {/* DRAWER LATERAL */}
       {filterOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={e => e.target === e.currentTarget && setFilterOpen(false)}>
-          {/* Overlay semitransparente */}
+        <div style={{ position: "fixed", inset: 0, zIndex: 40 }}>
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.18)" }} onClick={() => setFilterOpen(false)} />
-          {/* Panel */}
           <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 320, background: "white", boxShadow: "-4px 0 24px rgba(0,0,0,.12)", display: "flex", flexDirection: "column", zIndex: 41 }}
             onClick={e => e.stopPropagation()}>
-
-            {/* Header del drawer */}
             <div style={{ padding: "18px 20px 14px", borderBottom: `0.5px solid ${BORDER}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: GRAY_900 }}>Opciones de Filtros</div>
-              <button onClick={() => setFilterOpen(false)}
-                style={{ width: 28, height: 28, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 14, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              <button onClick={() => setFilterOpen(false)} style={{ width: 28, height: 28, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 14, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
-
-            {/* Campos — scrolleable */}
             <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}
               onKeyDown={e => e.key === "Enter" && applyFilters()}>
-
-              {/* ID Correlativo */}
               <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>ID Correlativo</div>
-                <input value={dIdCorr} onChange={e => setDIdCorr(e.target.value)}
-                  placeholder="Ej: INDU Nro784"
-                  style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>N° SPOT</div>
+                <input value={dNroSpot} onChange={e => setDNroSpot(e.target.value)} placeholder="Ej: Nro000004006268" style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
-
-              {/* Nro SPOT */}
               <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Nro SPOT</div>
-                <input value={dNroSpot} onChange={e => setDNroSpot(e.target.value)}
-                  placeholder="Ej: Nro000004006780"
-                  style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Ruta | N°GR | N°Carga</div>
+                <input value={dRutas} onChange={e => setDRutas(e.target.value)} placeholder="Ej: GR001234" style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
-
-              {/* Rutas / GR */}
               <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Rutas / GR</div>
-                <input value={dRutas} onChange={e => setDRutas(e.target.value)}
-                  placeholder="Ej: GR001234"
-                  style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>N° Placa</div>
+                <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())} placeholder="Ej: ABC-123" maxLength={7} style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
               </div>
-
-              {/* Placa */}
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Placa</div>
-                <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())}
-                  placeholder="Ej: ABC-123"
-                  maxLength={7}
-                  style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
-              </div>
-
-              {/* Estado doc */}
               <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Estado doc</div>
-                <select value={dEstadoDoc} onChange={e => setDEstadoDoc(e.target.value)}
-                  style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
+                <select value={dEstadoDoc} onChange={e => setDEstadoDoc(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
                   <option value="">Todos</option>
                   <option value="Completo">Completo</option>
                   <option value="Pendiente">Pendiente</option>
                 </select>
               </div>
-
-              {/* Rango de fecha con calendario */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Condición Final</div>
+                <select value={dEstFinal} onChange={e => setDEstFinal(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
+                  <option value="">Todos</option>
+                  <option value="FINALIZADO">FINALIZADO</option>
+                  <option value="PENDIENTE">PENDIENTE</option>
+                </select>
+              </div>
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
                   <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 7 días</div>
                 </div>
-                <RangePicker
-                  desde={dDesde}
-                  hasta={dHasta}
-                  onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }}
-                />
+                <RangePicker desde={dDesde} hasta={dHasta} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
                 {fechaErr && (
                   <div style={{ marginTop: 8, padding: "7px 10px", background: RED_LIGHT, border: `0.5px solid #f7c1c1`, borderRadius: 7, fontSize: 11, color: RED_DARK }}>
                     ⚠ {fechaErr}
@@ -659,121 +592,132 @@ export default function App() {
                 )}
               </div>
             </div>
-
-            {/* Footer con botones */}
             <div style={{ padding: "14px 20px", borderTop: `0.5px solid ${BORDER}`, display: "flex", gap: 8, flexShrink: 0 }}>
-              <button onClick={clearFilters}
-                style={{ flex: 1, padding: "9px 0", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500, fontWeight: 500 }}>
-                Limpiar
-              </button>
-              <button onClick={applyFilters}
-                style={{ flex: 2, padding: "9px 0", background: RED, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                Buscar
-              </button>
+              <button onClick={clearFilters} style={{ flex: 1, padding: "9px 0", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500, fontWeight: 500 }}>Limpiar</button>
+              <button onClick={applyFilters} style={{ flex: 2, padding: "9px 0", background: RED, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Buscar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* TABLE */}
+      {/* TABLA */}
       <div style={{ flex: 1, padding: "14px 18px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div style={{ overflowX: "auto", overflowY: "auto", flex: 1, background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
-              <colgroup>
-                {COLS.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
-                <col style={{ width: 50 }} />
-                <col style={{ width: 96 }} />
-                <col style={{ width: 96 }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  {COLS.map(c => (
-                    <th key={c.key} style={{ padding: "8px 11px", textAlign: c.right ? "right" : "left", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", position: "sticky", top: 0, zIndex: 3, textTransform: "uppercase", letterSpacing: ".03em" }}>
-                      {c.label}
-                    </th>
-                  ))}
-                  <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>
-                    {/* lápiz — sin label */}
+            <colgroup>
+              {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
+              <col style={{ width: 36 }} />
+              <col style={{ width: 80 }} />
+              <col style={{ width: 96 }} />
+              <col style={{ width: 96 }} />
+            </colgroup>
+            <thead>
+              <tr>
+                {colsVisibles.map(c => (
+                  <th key={c.key} style={{ padding: "8px 11px", textAlign: c.right ? "right" : "left", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", position: "sticky", top: 0, zIndex: 3, textTransform: "uppercase", letterSpacing: ".03em" }}>
+                    {c.label}
                   </th>
-                  <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>
-                    Estado doc
-                  </th>
-                  <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>
-                    Doc. adjuntos
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {viajes.length === 0 ? (
-                  <tr><td colSpan={COLS.length + 2} style={{ padding: 40, textAlign: "center", color: GRAY_500, fontSize: 12 }}>No hay viajes que mostrar</td></tr>
-                ) : viajes.map(v => {
-                  const versiones = v.foto_versiones || [];
-                  const nv = versiones.length;
-                  const completo = nv > 0;
-                  return (
-                    <tr key={v.id_correlativo} className="viaje-row">
-                      {COLS.map(c => {
-                        let content;
-                        if (c.key === "status") {
-                          const ok = v.status?.toLowerCase().includes("realizado");
-                          const warn = v.status?.toLowerCase().includes("no");
-                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 500, background: ok ? GREEN_LIGHT : warn ? "#faeeda" : GRAY_100, color: ok ? GREEN : warn ? "#854f0b" : GRAY_500 }}>{v[c.key] || "—"}</span>;
-                        } else if (c.key === "tipo_traslado") {
-                          content = <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: v[c.key] === "TEA" ? "#e6f1fb" : RED_LIGHT, color: v[c.key] === "TEA" ? "#185fa5" : RED_DARK, fontWeight: 500 }}>{v[c.key] || "—"}</span>;
-                        } else if (c.key === "importe_servicio") {
-                          content = v[c.key] && v[c.key] !== "—" ? `S/${parseFloat(v[c.key]).toLocaleString("es-PE")}` : "—";
-                        } else {
-                          content = v[c.key] || "—";
-                        }
-                        const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
-                        return (
-                          <td key={c.key} title={c.trunc ? (v[c.key] || "") : undefined}
-                            data-editable={editable ? "1" : undefined}
-                            style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
-                            {content}
-                          </td>
-                        );
-                      })}
-                      {/* Botón lápiz — solo visible para transportistas */}
-                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center", overflow: "hidden" }}>
-                        {!isAdmin && (
-                          <button onClick={() => openEditModal(v)}
-                            title="Editar Placa y Rutas/GR"
-                            style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GRAY_900} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                ))}
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 272, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
+                <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Estado doc</th>
+                <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {viajes.length === 0 ? (
+                <tr><td colSpan={colsVisibles.length + 4} style={{ padding: 40, textAlign: "center", color: GRAY_500 }}>No hay registros para el rango seleccionado</td></tr>
+              ) : viajes.map(v => {
+                const completo = (v.foto_versiones?.length || 0) > 0;
+                const tieneUrl = !!v.foto_url;
+                return (
+                  <tr key={v.nro_spot} className="viaje-row">
+                    {colsVisibles.map(c => {
+                      const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
+                      let content = v[c.key];
+                      // Renderizar badges para campos de estado
+                      if (["estado_final","estado_validacion_ia","resultado_ia","estado_ejecucion"].includes(c.key)) {
+                        content = <Badge value={v[c.key]} />;
+                      } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
+                        content = v[c.key] ? new Date(v[c.key]).toLocaleDateString("es-PE") : <span style={{ color: GRAY_500 }}>—</span>;
+                      } else if (!content) {
+                        content = <span style={{ color: GRAY_200 }}>—</span>;
+                      }
+                      return (
+                        <td key={c.key} title={c.trunc ? (v[c.key] || "") : undefined}
+                          data-editable={editable ? "1" : undefined}
+                          style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
+                          {content}
+                        </td>
+                      );
+                    })}
+
+                    {/* Botón lápiz — editar placa y rutas (solo transportista) */}
+                    <td style={{ padding: "4px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 272, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      {!isAdmin && (
+                        <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
+                          style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GRAY_900} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
+                      )}
+                      {/* Botón validar manual — solo admin */}
+                      {isAdmin && v.estado_final !== "FINALIZADO" && (
+                        <button onClick={() => { setValidModal(v); setValidErr(""); }} title="Validar manualmente"
+                          style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${BLUE}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={BLUE} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                        </button>
+                      )}
+                    </td>
+
+                    {/* Botones ojo + descarga (visibles si hay foto) */}
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      {tieneUrl && (
+                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                          <a href={v.foto_url} target="_blank" rel="noopener noreferrer" title="Ver foto"
+                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", color: GRAY_500 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                              <circle cx="12" cy="12" r="3"/>
                             </svg>
-                          </button>
-                        )}
-                      </td>
-                      <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center", overflow: "hidden" }}>
-                        <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 500, background: completo ? GREEN_LIGHT : RED_LIGHT, color: completo ? GREEN : RED }}>
-                          {completo ? "Completo" : "Pendiente"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 0, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center", overflow: "hidden" }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                          <button onClick={() => openModal(v)}
-                            style={{ width: 28, height: 28, borderRadius: "50%", border: `1.5px solid ${completo ? GREEN : GRAY_200}`, cursor: "pointer", background: completo ? GREEN_LIGHT : "white", color: completo ? GREEN : GRAY_500, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}
-                            title={completo ? "Agregar nuevo documento" : "Subir documento"}>
-                            {completo ? "✓" : "↑"}
-                          </button>
-                          {completo && (
-                            <button onClick={() => openModal(v)}
-                              style={{ width: 20, height: 20, borderRadius: "50%", border: `1px solid ${BORDER}`, cursor: "pointer", background: "white", color: GRAY_500, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}
-                              title="Agregar nuevo documento">↑</button>
-                          )}
+                          </a>
+                          <a href={v.foto_url} download={v.foto_nombre || "documento"} title="Descargar foto"
+                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", color: GRAY_500 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                              <polyline points="7 10 12 15 17 10"/>
+                              <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                          </a>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-        </div>
-        <div style={{ fontSize: 11, color: GRAY_500, marginTop: 8, textAlign: "right" }}>
-          {viajes.length} viajes · {viajes.filter(v => (v.foto_versiones?.length || 0) > 0).length} con documento · {viajes.filter(v => !(v.foto_versiones?.length > 0)).length} pendientes
+                      )}
+                    </td>
+
+                    {/* Estado doc */}
+                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 500, background: completo ? GREEN_LIGHT : RED_LIGHT, color: completo ? GREEN : RED }}>
+                        {completo ? "Completo" : "Pendiente"}
+                      </span>
+                    </td>
+
+                    {/* Doc. adjuntos — botón subir */}
+                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 0, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      {!isAdmin && (
+                        <button onClick={() => openModal(v)}
+                          style={{ width: 28, height: 28, borderRadius: "50%", border: `1.5px solid ${completo ? GREEN : GRAY_200}`, background: "white", color: completo ? GREEN : GRAY_500, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+                          {completo ? "✓" : "↑"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -782,78 +726,69 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && !editSaving && setEditModal(null)}>
           <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
-
-            {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
               <div style={{ fontSize: 14, fontWeight: 500 }}>Editar datos del viaje</div>
-              <button onClick={() => setEditModal(null)} disabled={editSaving}
-                style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              <button onClick={() => setEditModal(null)} disabled={editSaving} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
-            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18 }}>
-              {editModal.id_correlativo} · {editModal.cd_origen} → {editModal.cd_destino}
-            </div>
-
-            {/* Placa */}
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{editModal.nro_spot}</div>
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Placa</div>
-              <input
-                value={editPlaca}
-                onChange={e => { setEditPlaca(e.target.value.toUpperCase()); setEditErr(""); }}
-                placeholder="ABC-123"
-                maxLength={7}
-                style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }}
-              />
-              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Formato: 3 letras o números, guion, 3 letras o números. Ej: ABC-123</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
+              <input value={editPlaca} onChange={e => { setEditPlaca(e.target.value.toUpperCase()); setEditErr(""); }}
+                placeholder="ABC-123" maxLength={7}
+                style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Formato: 3 caracteres, guion, 3 caracteres. Ej: ABC-123</div>
             </div>
-
-            {/* Rutas / GR */}
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Rutas / GR</div>
-
-              {/* Chips */}
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Ruta | N°GR | N°Carga</div>
               {editRutas.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                   {editRutas.map((r, i) => (
                     <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "#FFFBF0", border: `1px solid ${BORDER}`, borderRadius: 999, fontSize: 11, color: GRAY_900 }}>
                       {r}
-                      <button onClick={() => removeRuta(i)}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: GRAY_500, fontSize: 11, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>✕</button>
+                      <button onClick={() => removeRuta(i)} style={{ background: "none", border: "none", cursor: "pointer", color: GRAY_500, fontSize: 11, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>✕</button>
                     </span>
                   ))}
                 </div>
               )}
-
-              {/* Input + botón + */}
               <div style={{ display: "flex", gap: 6 }}>
-                <input
-                  value={editRutaInput}
-                  onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
+                <input value={editRutaInput} onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
                   onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addRuta())}
                   placeholder="Ej: GR001234 o Ruta Trujillo"
-                  style={{ ...inp, flex: 1, background: "#FFFBF0", border: `1px solid ${BORDER}` }}
-                />
-                <button onClick={addRuta}
-                  style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${BORDER}`, background: "#FFFBF0", color: GRAY_900, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 400 }}>+</button>
+                  style={{ ...inp, flex: 1, background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+                <button onClick={addRuta} style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${BORDER}`, background: "#FFFBF0", color: GRAY_900, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
               </div>
-              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter o el botón + para agregar cada ruta o GR.</div>
+              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter o + para agregar.</div>
             </div>
-
-            {/* Error */}
-            {editErr && (
-              <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>
-                ⚠ {editErr}
-              </div>
-            )}
-
-            {/* Botones */}
+            {editErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>⚠ {editErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setEditModal(null)} disabled={editSaving}
-                style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>
-                Cancelar
-              </button>
-              <button onClick={saveEdit} disabled={editSaving}
-                style={{ padding: "7px 16px", background: editSaving ? GRAY_200 : RED, color: editSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: editSaving ? "default" : "pointer" }}>
+              <button onClick={() => setEditModal(null)} disabled={editSaving} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
+              <button onClick={saveEdit} disabled={editSaving} style={{ padding: "7px 16px", background: editSaving ? GRAY_200 : RED, color: editSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: editSaving ? "default" : "pointer" }}>
                 {editSaving ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL VALIDACIÓN MANUAL ADMIN */}
+      {validModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && !validSaving && setValidModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 400, maxWidth: "94vw" }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Validar viaje manualmente</div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontFamily: "monospace" }}>{validModal.nro_spot}</div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18 }}>
+              {validModal.cd_origen} → {validModal.cd_destino} · {validModal.proveedor}
+            </div>
+            <div style={{ padding: "12px 14px", background: BLUE_LIGHT, borderRadius: 8, fontSize: 12, color: BLUE, marginBottom: 18, border: `0.5px solid #b3cfea` }}>
+              Al confirmar, el viaje quedará como <strong>FINALIZADO</strong> con resultado <strong>MANUAL</strong>. Esta acción queda registrada con tu usuario y la fecha actual.
+            </div>
+            {validErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {validErr}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setValidModal(null)} disabled={validSaving} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
+              <button onClick={handleValidarManual} disabled={validSaving}
+                style={{ padding: "7px 16px", background: validSaving ? GRAY_200 : BLUE, color: validSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: validSaving ? "default" : "pointer" }}>
+                {validSaving ? "Validando..." : "Confirmar validación"}
               </button>
             </div>
           </div>
@@ -869,8 +804,7 @@ export default function App() {
               <div style={{ fontSize: 14, fontWeight: 500 }}>Subir documento</div>
               <button onClick={() => setModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
-            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14 }}>{modal.id_correlativo} · {modal.cd_origen} → {modal.cd_destino}</div>
-
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, fontFamily: "monospace" }}>{modal.nro_spot}</div>
             {uploadSuccess ? (
               <div style={{ textAlign: "center", padding: "24px 0" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
@@ -883,29 +817,17 @@ export default function App() {
                     ✓ Ya tienes {modal.foto_versiones.length} documento(s) subido(s). Puedes agregar otro si necesitas corregir.
                   </div>
                 )}
-                <div onClick={() => fileRef.current?.click()}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => { e.preventDefault(); handleFileSelect(e.dataTransfer.files[0]); }}
+                <div onClick={() => fileRef.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFileSelect(e.dataTransfer.files[0]); }}
                   style={{ border: `1.5px dashed ${GRAY_200}`, borderRadius: 10, padding: "22px 16px", textAlign: "center", cursor: "pointer", marginBottom: 12 }}>
                   <div style={{ fontSize: 22, color: GRAY_200, marginBottom: 6 }}>📷</div>
-                  <div style={{ fontSize: 12, color: GRAY_500 }}>
-                    {uploadFile ? uploadFile.name : "Clic o arrastra tu foto aquí"}
-                  </div>
+                  <div style={{ fontSize: 12, color: GRAY_500 }}>{uploadFile ? uploadFile.name : "Clic o arrastra tu foto aquí"}</div>
                 </div>
-
                 {uploadFile && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: GRAY_100, borderRadius: 8, fontSize: 11, color: GRAY_900, marginBottom: 12, border: `0.5px solid ${BORDER}` }}>
-                    <span>📎</span>
-                    <span style={{ flex: 1 }}>Archivo adjunto: {uploadFile.name}</span>
+                    <span>📎</span><span style={{ flex: 1 }}>Archivo: {uploadFile.name}</span>
                   </div>
                 )}
-
-                {uploadErr && (
-                  <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>
-                    ⚠ {uploadErr}
-                  </div>
-                )}
-
+                {uploadErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>⚠ {uploadErr}</div>}
                 <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFileSelect(e.target.files[0])} />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button onClick={() => setModal(null)} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
