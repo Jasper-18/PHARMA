@@ -23,30 +23,31 @@ const BORDER = "#e5e2db";
 const MAX_MB = 10;
 
 // Orden de columnas según diseño acordado (posición 6 = Proveedor, solo visible para admin)
+// headerGroup: 'ia' = encabezado con fondo azul tenue, 'transportista' = fondo amarillo tenue
 const COLS = [
-  { key: "nro_spot",            label: "N° SPOT",             width: 210, mono: true },
-  { key: "fecha_carga",         label: "Fecha Carga",         width: 100 },
-  { key: "estado_final",        label: "Condición Final",     width: 120 },
-  { key: "placa",               label: "N° Placa",            width: 90,  mono: true },
-  { key: "rutas",               label: "Ruta|N°GR|N°Carga",  width: 220, trunc: true },
-  { key: "proveedor",           label: "Proveedor",           width: 110, adminOnly: true },
-  { key: "hora_cita",           label: "Hora Cita",           width: 80 },
-  { key: "cd_origen",           label: "Origen",              width: 130 },
-  { key: "cd_destino",          label: "Destino",             width: 130 },
-  { key: "tipo_traslado",       label: "Tipo de Envío",       width: 90 },
-  { key: "cantidad",            label: "Cantidad",            width: 80,  right: true },
-  { key: "area",                label: "Área",                width: 120 },
-  { key: "requerimiento",       label: "Requerimiento",       width: 160, trunc: true },
-  { key: "importe",             label: "Importe S/",          width: 90,  right: true },
-  { key: "centro_costo",        label: "Centro de Costo",     width: 110, muted: true },
-  { key: "detalle_servicio",    label: "Detalle del Servicio",width: 180, trunc: true },
-  { key: "estado_ejecucion",    label: "Estado Ejecución",    width: 120 },
-  { key: "estado_validacion_ia",label: "Validación IA",       width: 100 },
-  { key: "resultado_ia",        label: "Resultado IA",        width: 100 },
-  { key: "detalle_ia",          label: "Detalle IA",          width: 130, trunc: true },
-  { key: "usuario_modif",       label: "Usuario Modif.",      width: 140, muted: true },
-  { key: "fecha_modif",         label: "Fecha Modif.",        width: 130, muted: true },
-  { key: "fecha_entrega_doc",   label: "Fec. Entrega Doc.",   width: 130 },
+  { key: "nro_spot",            label: "N° SPOT",                  width: 210, mono: true },
+  { key: "fecha_carga",         label: "Fecha Carga",              width: 100 },
+  { key: "estado_final",        label: "Estado de Viaje Final",    width: 150 },
+  { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
+  { key: "rutas",               label: "Ruta | N°GR | N°Carga",   width: 220, trunc: true, headerGroup: "transportista" },
+  { key: "proveedor",           label: "Proveedor",                width: 110, adminOnly: true },
+  { key: "hora_cita",           label: "Hora Cita",                width: 80 },
+  { key: "cd_origen",           label: "Origen",                   width: 130 },
+  { key: "cd_destino",          label: "Destino",                  width: 130 },
+  { key: "tipo_traslado",       label: "Tipo de Envío",            width: 90 },
+  { key: "cantidad",            label: "Cantidad",                 width: 80,  right: true },
+  { key: "area",                label: "Área",                     width: 120 },
+  { key: "requerimiento",       label: "Requerimiento",            width: 160, trunc: true },
+  { key: "importe",             label: "Importe S/",               width: 90,  right: true },
+  { key: "centro_costo",        label: "Centro de Costo",          width: 110, muted: true },
+  { key: "detalle_servicio",    label: "Detalle del Servicio",     width: 180, trunc: true },
+  { key: "estado_ejecucion",    label: "Estado Ejecución",         width: 120 },
+  { key: "estado_validacion_ia",label: "Validación IA",            width: 100, headerGroup: "ia" },
+  { key: "resultado_ia",        label: "Resultado IA",             width: 100, headerGroup: "ia" },
+  { key: "detalle_ia",          label: "Detalle IA",               width: 130, trunc: true, headerGroup: "ia" },
+  { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
+  { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
+  { key: "fecha_entrega_doc",   label: "Fec. Entrega Doc.",        width: 130 },
 ];
 
 // Extrae el segmento "Nro..." de un nro_spot para nombrar archivos
@@ -489,11 +490,14 @@ export default function App() {
       `}</style>
 
       {/* TOPBAR */}
-      <div style={{ height: 52, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 10, flexShrink: 0 }}>
-        <img src="/logo_fape.png" alt="FP" style={{ width: 30, height: 30, borderRadius: 6, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
-        <span style={{ fontSize: 16, fontWeight: 500, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .6, fontWeight: 400 }}>SPOT</span></span>
-        <div style={{ width: 1, height: 18, background: "rgba(255,255,255,.25)" }} />
-        <span style={{ fontSize: 13, color: "rgba(255,255,255,.75)", fontWeight: 400 }}>Seguimiento Adicionales</span>
+      <div style={{ height: 58, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 12, flexShrink: 0 }}>
+        <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 7, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <span style={{ fontSize: 19, fontWeight: 600, color: "white", letterSpacing: "-.3px", lineHeight: 1 }}>Pharma<span style={{ opacity: .55, fontWeight: 400 }}>SPOT</span></span>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,.70)", fontWeight: 400, lineHeight: 1 }}>
+            {isAdmin ? "Seguimiento de Adicionales" : `${empresa} — Seguimiento de Adicionales`}
+          </span>
+        </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
@@ -553,15 +557,15 @@ export default function App() {
               onKeyDown={e => e.key === "Enter" && applyFilters()}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>N° SPOT</div>
-                <input value={dNroSpot} onChange={e => setDNroSpot(e.target.value)} placeholder="Ej: Nro000004006268" style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                <input value={dNroSpot} onChange={e => setDNroSpot(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Ruta | N°GR | N°Carga</div>
-                <input value={dRutas} onChange={e => setDRutas(e.target.value)} placeholder="Ej: GR001234" style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                <input value={dRutas} onChange={e => setDRutas(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>N° Placa</div>
-                <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())} placeholder="Ej: ABC-123" maxLength={7} style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
+                <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())} maxLength={7} style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
               </div>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Estado doc</div>
@@ -614,7 +618,10 @@ export default function App() {
             <thead>
               <tr>
                 {colsVisibles.map(c => (
-                  <th key={c.key} style={{ padding: "8px 11px", textAlign: c.right ? "right" : "left", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", position: "sticky", top: 0, zIndex: 3, textTransform: "uppercase", letterSpacing: ".03em" }}>
+                  <th key={c.key} style={{ padding: "8px 11px", textAlign: c.right ? "right" : "left", fontSize: 10, fontWeight: 500,
+                    color: c.headerGroup === "ia" ? BLUE : c.headerGroup === "transportista" ? AMBER : GRAY_500,
+                    background: c.headerGroup === "ia" ? "#EEF4FC" : c.headerGroup === "transportista" ? "#FFF8EC" : GRAY_50,
+                    borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", position: "sticky", top: 0, zIndex: 3, textTransform: "uppercase", letterSpacing: ".03em" }}>
                     {c.label}
                   </th>
                 ))}
@@ -734,9 +741,8 @@ export default function App() {
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
               <input value={editPlaca} onChange={e => { setEditPlaca(e.target.value.toUpperCase()); setEditErr(""); }}
-                placeholder="ABC-123" maxLength={7}
+                maxLength={7}
                 style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
-              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Formato: 3 caracteres, guion, 3 caracteres. Ej: ABC-123</div>
             </div>
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Ruta | N°GR | N°Carga</div>
@@ -753,7 +759,6 @@ export default function App() {
               <div style={{ display: "flex", gap: 6 }}>
                 <input value={editRutaInput} onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
                   onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addRuta())}
-                  placeholder="Ej: GR001234 o Ruta Trujillo"
                   style={{ ...inp, flex: 1, background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
                 <button onClick={addRuta} style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${BORDER}`, background: "#FFFBF0", color: GRAY_900, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
               </div>
