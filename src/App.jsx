@@ -103,7 +103,7 @@ function ultimos7Dias() {
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_ES  = ["D","L","M","X","J","V","S"];
 
-function RangePicker({ desde, hasta, onChange }) {
+function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const parseFecha = s => s ? new Date(s + "T00:00:00") : null;
   const fmt = d => d ? d.toISOString().slice(0,10) : "";
@@ -131,7 +131,7 @@ function RangePicker({ desde, hasta, onChange }) {
     else {
       if (dia < selStart) { setSelStart(dia); setSelEnd(null); }
       else {
-        if ((dia - selStart) / 86400000 > 31) return;
+        if ((dia - selStart) / 86400000 > maxDias) return;
         setSelEnd(dia);
         onChange({ desde: fmt(selStart), hasta: fmt(dia) });
       }
@@ -159,7 +159,7 @@ function RangePicker({ desde, hasta, onChange }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px 0" }}>
         {diasDelMes().map((dia, i) => {
           const isS = esStart(dia), isE = esEnd(dia), isH = esHoy(dia), enR = enRango(dia);
-          const sobreLimite = selStart && !selEnd && hover && dia && (Math.abs(dia - selStart) / 86400000) > 31;
+          const sobreLimite = selStart && !selEnd && hover && dia && (Math.abs(dia - selStart) / 86400000) > maxDias;
           return (
             <div key={i} onClick={() => handleDia(dia)}
               onMouseEnter={() => { if (selStart && !selEnd && dia) setHover(dia); }}
@@ -344,8 +344,9 @@ export default function App() {
   function applyFilters() {
     if (dDesde && dHasta) {
       const diff = (new Date(dHasta) - new Date(dDesde)) / (1000 * 60 * 60 * 24);
+      const maxDias = isAdmin ? 7 : 31;
       if (diff < 0) { setFechaErr("La fecha 'Hasta' debe ser mayor o igual a 'Desde'."); return; }
-      if (diff > 31) { setFechaErr("El rango máximo permitido es de 31 días."); return; }
+      if (diff > maxDias) { setFechaErr(`El rango máximo permitido es de ${maxDias} días.`); return; }
     }
     setFechaErr("");
     setFNroSpot(dNroSpot); setFRutas(dRutas); setFPlaca(dPlaca);
@@ -706,9 +707,9 @@ export default function App() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
-                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 31 días</div>
+                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. {isAdmin ? 7 : 31} días</div>
                 </div>
-                <RangePicker desde={dDesde} hasta={dHasta} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
+                <RangePicker desde={dDesde} hasta={dHasta} maxDias={isAdmin ? 7 : 31} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
                 {fechaErr && (
                   <div style={{ marginTop: 8, padding: "7px 10px", background: RED_LIGHT, border: `0.5px solid #f7c1c1`, borderRadius: 7, fontSize: 11, color: RED_DARK }}>
                     ⚠ {fechaErr}
@@ -745,7 +746,7 @@ export default function App() {
                     {c.label}
                   </th>
                 ))}
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 272, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 272 : 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
                 {isAdmin && <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>}
                 <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Estado doc</th>
                 <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>
@@ -757,12 +758,19 @@ export default function App() {
               ) : viajes.map(v => {
                 const completo = (v.foto_versiones?.length || 0) > 0;
                 const tieneUrl = !!v.foto_url;
+                // right sticky: lápiz=36, foto=80(solo admin), estadoDoc=96, docAdj=96
+                // admin:        lápiz right=272, foto right=192, estadoDoc right=96, docAdj right=0
+                // transportista:lápiz right=192, estadoDoc right=96, docAdj right=0
+                const rLapiz     = isAdmin ? 272 : 192;
+                const rFoto      = 192; // solo admin
+                const rEstadoDoc = 96;
+                const rDocAdj    = 0;
+
                 return (
                   <tr key={v.nro_spot} className="viaje-row">
                     {colsVisibles.map(c => {
                       const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                       let content = v[c.key];
-                      // Solo resultado_ia y estado_validacion_ia conservan badge de color
                       if (["resultado_ia","estado_validacion_ia"].includes(c.key)) {
                         content = <Badge value={v[c.key]} />;
                       } else if (["estado_final","estado_ejecucion"].includes(c.key)) {
@@ -785,8 +793,8 @@ export default function App() {
                       );
                     })}
 
-                    {/* Botón lápiz — editar placa y rutas (solo transportista) */}
-                    <td style={{ padding: "4px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 272, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    {/* Botón lápiz / validar */}
+                    <td style={{ padding: "4px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rLapiz, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {!isAdmin && (
                         <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
@@ -796,9 +804,8 @@ export default function App() {
                           </svg>
                         </button>
                       )}
-                      {/* Botón validar manual — solo admin */}
                       {isAdmin && v.estado_final !== "FINALIZADO" && (
-                        <button onClick={() => { setValidModal(v); setValidErr(""); }} title="Validar manualmente"
+                        <button onClick={() => { setValidModal(v); setValidErr(""); }} title="Aprobar adicional"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${BLUE}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={BLUE} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="20 6 9 17 4 12"/>
@@ -807,9 +814,9 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Botones ojo + descarga — solo admin, solo si hay foto */}
+                    {/* Botones foto — solo admin */}
                     {isAdmin && (
-                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                         {completo && v.foto_url && (
                           <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
                             <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
@@ -833,14 +840,14 @@ export default function App() {
                     )}
 
                     {/* Estado doc */}
-                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rEstadoDoc, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 500, background: completo ? GREEN_LIGHT : RED_LIGHT, color: completo ? GREEN : RED }}>
                         {completo ? "Completo" : "Pendiente"}
                       </span>
                     </td>
 
                     {/* Doc. adjuntos — botón subir */}
-                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 0, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rDocAdj, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {!isAdmin && (
                         <button onClick={() => openModal(v)}
                           style={{ width: 28, height: 28, borderRadius: "50%", border: `1.5px solid ${completo ? GREEN : GRAY_200}`, background: "white", color: completo ? GREEN : GRAY_500, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
