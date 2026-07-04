@@ -95,7 +95,7 @@ async function comprimirImagen(file) {
 function ultimos7Dias() {
   const hoy = new Date();
   const desde = new Date(hoy);
-  desde.setDate(hoy.getDate() - 6);
+  desde.setDate(hoy.getDate() - 30);
   const fmt = d => d.toISOString().slice(0, 10);
   return { desde: fmt(desde), hasta: fmt(hoy) };
 }
@@ -131,7 +131,7 @@ function RangePicker({ desde, hasta, onChange }) {
     else {
       if (dia < selStart) { setSelStart(dia); setSelEnd(null); }
       else {
-        if ((dia - selStart) / 86400000 > 7) return;
+        if ((dia - selStart) / 86400000 > 31) return;
         setSelEnd(dia);
         onChange({ desde: fmt(selStart), hasta: fmt(dia) });
       }
@@ -159,7 +159,7 @@ function RangePicker({ desde, hasta, onChange }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px 0" }}>
         {diasDelMes().map((dia, i) => {
           const isS = esStart(dia), isE = esEnd(dia), isH = esHoy(dia), enR = enRango(dia);
-          const sobreLimite = selStart && !selEnd && hover && dia && (Math.abs(dia - selStart) / 86400000) > 7;
+          const sobreLimite = selStart && !selEnd && hover && dia && (Math.abs(dia - selStart) / 86400000) > 31;
           return (
             <div key={i} onClick={() => handleDia(dia)}
               onMouseEnter={() => { if (selStart && !selEnd && dia) setHover(dia); }}
@@ -345,7 +345,7 @@ export default function App() {
     if (dDesde && dHasta) {
       const diff = (new Date(dHasta) - new Date(dDesde)) / (1000 * 60 * 60 * 24);
       if (diff < 0) { setFechaErr("La fecha 'Hasta' debe ser mayor o igual a 'Desde'."); return; }
-      if (diff > 7) { setFechaErr("El rango máximo permitido es de 7 días."); return; }
+      if (diff > 31) { setFechaErr("El rango máximo permitido es de 31 días."); return; }
     }
     setFechaErr("");
     setFNroSpot(dNroSpot); setFRutas(dRutas); setFPlaca(dPlaca);
@@ -392,7 +392,7 @@ export default function App() {
     const min  = String(d.getMinutes()).padStart(2, "0");
     const ampm = h >= 12 ? "pm." : "am.";
     h = h % 12 || 12; // sin cero inicial: 4 en vez de 04
-    return `${dd}/${mm}/${aaaa} ${h}:${min}${ampm}`;
+    return `${dd}/${mm}/${aaaa} ${h}:${min} ${ampm}`;
   };
 
   function exportarExcel() {
@@ -456,10 +456,20 @@ export default function App() {
       alert("No se pudo obtener la URL de la foto.");
       return;
     }
-    const a = document.createElement("a");
-    a.href = data.signedUrl;
-    a.download = nombre || "documento.jpg";
-    a.click();
+    // Forzar descarga via blob para evitar que el navegador abra la imagen en pestaña
+    try {
+      const resp = await fetch(data.signedUrl);
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = nombre || "documento.jpg";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      // Fallback: abrir en pestaña si fetch falla por CORS
+      window.open(data.signedUrl, "_blank");
+    }
   }
 
   function openModal(viaje) { setModal(viaje); setUploadFile(null); setUploadErr(""); setUploadSuccess(false); }
@@ -583,7 +593,7 @@ export default function App() {
       {/* TOPBAR */}
       <div style={{ height: 54, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 12, flexShrink: 0 }}>
         <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 7, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
-        <span style={{ fontSize: 16, fontWeight: 700, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
+        <span style={{ fontSize: 19, fontWeight: 700, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
@@ -615,7 +625,7 @@ export default function App() {
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, lineHeight: 1 }}>
-            {isAdmin ? "Seguimiento de Adicionales General" : `${empresa} — Seguimiento de Adicionales`}
+            {isAdmin ? "Seguimiento General de Adicionales" : `${empresa} — Seguimiento de Adicionales`}
           </span>
           {filtrosActivos && (
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
@@ -696,7 +706,7 @@ export default function App() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
-                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 7 días</div>
+                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 31 días</div>
                 </div>
                 <RangePicker desde={dDesde} hasta={dHasta} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
                 {fechaErr && (
@@ -721,7 +731,7 @@ export default function App() {
             <colgroup>
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
               <col style={{ width: 36 }} />
-              <col style={{ width: 80 }} />
+              {isAdmin && <col style={{ width: 80 }} />}
               <col style={{ width: 96 }} />
               <col style={{ width: 96 }} />
             </colgroup>
@@ -736,7 +746,7 @@ export default function App() {
                   </th>
                 ))}
                 <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 272, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>{isAdmin ? "Foto" : ""}</th>
+                {isAdmin && <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>}
                 <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Estado doc</th>
                 <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>
               </tr>
@@ -798,27 +808,29 @@ export default function App() {
                     </td>
 
                     {/* Botones ojo + descarga — solo admin, solo si hay foto */}
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
-                      {isAdmin && completo && v.foto_url && (
-                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                          <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
-                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                              <circle cx="12" cy="12" r="3"/>
-                            </svg>
-                          </button>
-                          <button onClick={() => descargarFoto(v.foto_url, v.foto_nombre)} title="Descargar foto"
-                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                              <polyline points="7 10 12 15 17 10"/>
-                              <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                    </td>
+                    {isAdmin && (
+                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 192, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                        {completo && v.foto_url && (
+                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                            <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
+                              style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                              </svg>
+                            </button>
+                            <button onClick={() => descargarFoto(v.foto_url, v.foto_nombre)} title="Descargar foto"
+                              style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    )}
 
                     {/* Estado doc */}
                     <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
