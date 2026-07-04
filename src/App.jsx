@@ -25,7 +25,6 @@ const COLS = [
   { key: "fecha_carga", label: "Fecha", width: 90 },
   { key: "tipo_traslado", label: "Tipo", width: 60 },
   { key: "tipo_oneway", label: "Modalidad", muted: true, width: 90 },
-  { key: "nro_traslado", label: "Nro Traslado", trunc: true, width: 120 },
   { key: "cd_origen", label: "Origen", width: 130 },
   { key: "cd_destino", label: "Destino", width: 130 },
   { key: "placa", label: "Placa", mono: true, width: 90 },
@@ -83,6 +82,129 @@ async function comprimirImagen(file) {
   });
 }
 
+// Devuelve { desde, hasta } con los últimos 7 días en formato YYYY-MM-DD
+function ultimos7Dias() {
+  const hoy = new Date();
+  const desde = new Date(hoy);
+  desde.setDate(hoy.getDate() - 6);
+  const fmt = d => d.toISOString().slice(0, 10);
+  return { desde: fmt(desde), hasta: fmt(hoy) };
+}
+
+const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const DIAS_ES = ["D","L","M","X","J","V","S"];
+
+// Calendario de rango inline — selección de inicio y fin en una sola vista
+function RangePicker({ desde, hasta, onChange }) {
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const parseFecha = s => s ? new Date(s + "T00:00:00") : null;
+  const fmt = d => d ? d.toISOString().slice(0,10) : "";
+
+  const inicioMes = (() => {
+    const ref = parseFecha(desde) || hoy;
+    return new Date(ref.getFullYear(), ref.getMonth(), 1);
+  })();
+  const [mesVista, setMesVista] = useState(inicioMes);
+  const [selStart, setSelStart] = useState(parseFecha(desde));
+  const [selEnd, setSelEnd] = useState(parseFecha(hasta));
+  const [hover, setHover] = useState(null);
+
+  const prevMes = () => setMesVista(m => new Date(m.getFullYear(), m.getMonth()-1, 1));
+  const nextMes = () => setMesVista(m => new Date(m.getFullYear(), m.getMonth()+1, 1));
+
+  const diasDelMes = () => {
+    const dias = [];
+    const primero = new Date(mesVista.getFullYear(), mesVista.getMonth(), 1);
+    const inicio = primero.getDay(); // 0=dom
+    for (let i = 0; i < inicio; i++) dias.push(null);
+    const total = new Date(mesVista.getFullYear(), mesVista.getMonth()+1, 0).getDate();
+    for (let d = 1; d <= total; d++) dias.push(new Date(mesVista.getFullYear(), mesVista.getMonth(), d));
+    return dias;
+  };
+
+  const handleDia = (dia) => {
+    if (!dia) return;
+    if (!selStart || (selStart && selEnd)) {
+      setSelStart(dia); setSelEnd(null); setHover(null);
+    } else {
+      if (dia < selStart) { setSelStart(dia); setSelEnd(null); }
+      else {
+        const diff = (dia - selStart) / 86400000;
+        if (diff > 7) return; // bloquear más de 7 días
+        setSelEnd(dia);
+        onChange({ desde: fmt(selStart), hasta: fmt(dia) });
+      }
+    }
+  };
+
+  const enRango = (dia) => {
+    if (!dia) return false;
+    const end = selEnd || hover;
+    if (selStart && end) return dia >= selStart && dia <= end;
+    return false;
+  };
+  const esStart = d => d && selStart && fmt(d) === fmt(selStart);
+  const esEnd = d => d && selEnd && fmt(d) === fmt(selEnd);
+  const esHoy = d => d && fmt(d) === fmt(hoy);
+
+  const rangoValido = selStart && selEnd && ((selEnd - selStart) / 86400000) <= 7;
+
+  return (
+    <div style={{ userSelect: "none" }}>
+      {/* Navegación mes */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <button onClick={prevMes} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: GRAY_500, padding: "2px 6px" }}>‹</button>
+        <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em" }}>
+          {MESES_ES[mesVista.getMonth()]} {mesVista.getFullYear()}
+        </div>
+        <button onClick={nextMes} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: GRAY_500, padding: "2px 6px" }}>›</button>
+      </div>
+      {/* Cabecera días */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
+        {DIAS_ES.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, color: GRAY_500, fontWeight: 500, padding: "2px 0" }}>{d}</div>)}
+      </div>
+      {/* Días */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px 0" }}>
+        {diasDelMes().map((dia, i) => {
+          const enR = enRango(dia);
+          const isS = esStart(dia);
+          const isE = esEnd(dia);
+          const isH = esHoy(dia);
+          const seleccionando = selStart && !selEnd;
+          const sobreLimite = seleccionando && hover && dia && selStart && ((Math.abs(dia - selStart)) / 86400000) > 7;
+          return (
+            <div key={i}
+              onClick={() => handleDia(dia)}
+              onMouseEnter={() => { if (seleccionando && dia) setHover(dia); }}
+              onMouseLeave={() => setHover(null)}
+              style={{
+                height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: dia ? "pointer" : "default",
+                background: (isS || isE) ? RED : enR ? "#FDDDE3" : "transparent",
+                borderRadius: isS ? "50% 0 0 50%" : isE ? "0 50% 50% 0" : (isS && isE) ? "50%" : 0,
+                color: (isS || isE) ? "white" : sobreLimite ? "#ccc" : isH ? RED : dia ? GRAY_900 : "transparent",
+                fontWeight: (isS || isE || isH) ? 600 : 400,
+                fontSize: 12,
+                outline: isH && !isS && !isE ? `1.5px solid ${RED}` : "none",
+                outlineOffset: -2,
+              }}>
+              {dia ? dia.getDate() : ""}
+            </div>
+          );
+        })}
+      </div>
+      {/* Leyenda rango seleccionado */}
+      <div style={{ marginTop: 10, padding: "6px 10px", background: GRAY_100, borderRadius: 7, fontSize: 11, color: GRAY_500, textAlign: "center" }}>
+        {rangoValido
+          ? `${fmt(selStart)} – ${fmt(selEnd)}`
+          : selStart && !selEnd
+            ? `Desde ${fmt(selStart)} — selecciona el día final (máx. 7 días)`
+            : "Selecciona el día de inicio"}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -91,14 +213,17 @@ export default function App() {
   const [loginErr, setLoginErr] = useState("");
   const [viajes, setViajes] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
-  const [fDesde, setFDesde] = useState("");
-  const [fHasta, setFHasta] = useState("");
-  const [fStatus, setFStatus] = useState("");
-  const [fEstadoDoc, setFEstadoDoc] = useState("");
-  const [fIdCorr, setFIdCorr] = useState("");
-  const [fNroSpot, setFNroSpot] = useState("");
-  const [fRutas, setFRutas] = useState("");
-  const [fPlaca, setFPlaca] = useState("");
+  // Lee filtros guardados en sessionStorage, o usa últimos 7 días por defecto
+  const _saved = (() => { try { return JSON.parse(sessionStorage.getItem("ps_filters") || "{}"); } catch { return {}; } })();
+  const _def7 = ultimos7Dias();
+  const [fDesde, setFDesde] = useState(_saved.fDesde ?? _def7.desde);
+  const [fHasta, setFHasta] = useState(_saved.fHasta ?? _def7.hasta);
+  const [fStatus, setFStatus] = useState(_saved.fStatus ?? "");
+  const [fEstadoDoc, setFEstadoDoc] = useState(_saved.fEstadoDoc ?? "");
+  const [fIdCorr, setFIdCorr] = useState(_saved.fIdCorr ?? "");
+  const [fNroSpot, setFNroSpot] = useState(_saved.fNroSpot ?? "");
+  const [fRutas, setFRutas] = useState(_saved.fRutas ?? "");
+  const [fPlaca, setFPlaca] = useState(_saved.fPlaca ?? "");
   const [filterOpen, setFilterOpen] = useState(false);
   // Draft filters — se aplican solo al presionar Buscar
   const [dIdCorr, setDIdCorr] = useState("");
@@ -187,6 +312,11 @@ export default function App() {
   // Solo carga al iniciar sesión — no refresca al cambiar de pestaña
   useEffect(() => { if (session) fetchViajes(); }, [session]);
 
+  // Persistir filtros activos en sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca }));
+  }, [fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca]);
+
   // Actualiza los filtros en el ref sin disparar refetch
   useEffect(() => {
     fetchViajesRef.current = { fDesde, fHasta, fStatus, fEstadoDoc, fNroSpot, fRutas, fIdCorr, fPlaca };
@@ -273,10 +403,11 @@ export default function App() {
   }
 
   function clearFilters() {
+    const d = ultimos7Dias();
     setDIdCorr(""); setDNroSpot(""); setDRutas(""); setDPlaca("");
-    setDEstadoDoc(""); setDDesde(""); setDHasta(""); setFechaErr("");
+    setDEstadoDoc(""); setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
     setFIdCorr(""); setFNroSpot(""); setFRutas(""); setFPlaca("");
-    setFEstadoDoc(""); setFDesde(""); setFHasta("");
+    setFEstadoDoc(""); setFDesde(d.desde); setFHasta(d.hasta);
     setTimeout(() => fetchViajes(), 0);
   }
 
@@ -510,24 +641,17 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Rango de fecha */}
+              {/* Rango de fecha con calendario */}
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
                   <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 7 días</div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4 }}>Desde</div>
-                    <input type="date" value={dDesde} onChange={e => { setDDesde(e.target.value); setFechaErr(""); }}
-                      style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 4 }}>Hasta</div>
-                    <input type="date" value={dHasta} onChange={e => { setDHasta(e.target.value); setFechaErr(""); }}
-                      style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
-                  </div>
-                </div>
+                <RangePicker
+                  desde={dDesde}
+                  hasta={dHasta}
+                  onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }}
+                />
                 {fechaErr && (
                   <div style={{ marginTop: 8, padding: "7px 10px", background: RED_LIGHT, border: `0.5px solid #f7c1c1`, borderRadius: 7, fontSize: 11, color: RED_DARK }}>
                     ⚠ {fechaErr}
