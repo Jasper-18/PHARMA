@@ -369,6 +369,34 @@ export default function App() {
     setFilterOpen(true);
   }
 
+  function exportarExcel() {
+    if (!viajes.length) return;
+    const colsExp = colsVisibles;
+    // Cabeceras
+    const headers = colsExp.map(c => c.label);
+    // Filas
+    const rows = viajes.map(v => colsExp.map(c => {
+      const val = v[c.key];
+      if (val === null || val === undefined) return "";
+      if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc")
+        return val ? new Date(val).toLocaleDateString("es-PE") : "";
+      if (c.key === "foto_versiones") return Array.isArray(val) ? val.length : 0;
+      return String(val);
+    }));
+
+    // Generar CSV con separador de tabulación para que Excel auto-ajuste columnas
+    const escape = v => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [headers.map(escape).join("\t"), ...rows.map(r => r.map(escape).join("\t"))];
+    const bom = "\uFEFF"; // BOM para que Excel detecte UTF-8
+    const blob = new Blob([bom + lines.join("\n")], { type: "text/tab-separated-values;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = "viajes_adicionales.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function openModal(viaje) { setModal(viaje); setUploadFile(null); setUploadErr(""); setUploadSuccess(false); }
 
   function handleFileSelect(file) {
@@ -484,20 +512,13 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
       <style>{`
         .viaje-row td { background: white; transition: background 0.08s; }
-        .viaje-row td[data-editable] { background: #FFFBF0; }
         .viaje-row:hover td { background: #FFF5F5; }
-        .viaje-row:hover td[data-editable] { background: #FFF0D6; }
       `}</style>
 
       {/* TOPBAR */}
-      <div style={{ height: 58, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 12, flexShrink: 0 }}>
+      <div style={{ height: 54, background: RED, display: "flex", alignItems: "center", padding: "0 18px", gap: 12, flexShrink: 0 }}>
         <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 7, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <span style={{ fontSize: 19, fontWeight: 600, color: "white", letterSpacing: "-.3px", lineHeight: 1 }}>Pharma<span style={{ opacity: .55, fontWeight: 400 }}>SPOT</span></span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,.70)", fontWeight: 400, lineHeight: 1 }}>
-            {isAdmin ? "Seguimiento de Adicionales" : `${empresa} — Seguimiento de Adicionales`}
-          </span>
-        </div>
+        <span style={{ fontSize: 22, fontWeight: 700, color: "white", letterSpacing: "-.4px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
@@ -526,13 +547,25 @@ export default function App() {
       </div>
 
       {/* TOOLBAR */}
-      <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: GRAY_900, flex: 1 }}>
-          {isAdmin ? "Todos los transportes" : empresa}
+      <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, lineHeight: 1 }}>
+            {isAdmin ? "Todos los transportes" : `${empresa} — Seguimiento de Adicionales`}
+          </span>
           {filtrosActivos && (
-            <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, background: RED, color: "white", borderRadius: 999, padding: "2px 8px" }}>Filtros activos</span>
+            <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
           )}
-        </span>
+        </div>
+        {/* Exportar Excel */}
+        <button onClick={exportarExcel} title="Exportar a Excel"
+          style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Excel
+        </button>
         <button onClick={clearFilters} title="Limpiar filtros"
           style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         <button onClick={fetchViajes} title="Actualizar"
@@ -642,9 +675,12 @@ export default function App() {
                     {colsVisibles.map(c => {
                       const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                       let content = v[c.key];
-                      // Renderizar badges para campos de estado
-                      if (["estado_final","estado_validacion_ia","resultado_ia","estado_ejecucion"].includes(c.key)) {
+                      // Badge de semáforo solo para estado_final, resultado_ia, estado_validacion_ia, detalle_ia
+                      if (["estado_final","resultado_ia","estado_validacion_ia"].includes(c.key)) {
                         content = <Badge value={v[c.key]} />;
+                      } else if (c.key === "estado_ejecucion") {
+                        // Texto plano en mayúsculas, sin colores
+                        content = v[c.key] ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span> : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
                         content = v[c.key] ? new Date(v[c.key]).toLocaleDateString("es-PE") : <span style={{ color: GRAY_500 }}>—</span>;
                       } else if (!content) {
