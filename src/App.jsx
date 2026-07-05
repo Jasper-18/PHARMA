@@ -48,6 +48,7 @@ const COLS = [
   { key: "detalle_ia",          label: "Detalle IA",               width: 130, trunc: true, headerGroup: "ia" },
   { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
+  { key: "estado_doc",          label: "Estado Doc.",              width: 100 },
   { key: "fecha_entrega_doc",   label: "Fec. Entrega Doc.",        width: 130 },
 ];
 
@@ -750,8 +751,7 @@ export default function App() {
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
               <col style={{ width: 36 }} />
               {isAdmin && <col style={{ width: 80 }} />}
-              <col style={{ width: 96 }} />
-              <col style={{ width: 96 }} />
+              {!isAdmin && <col style={{ width: 96 }} />}
             </colgroup>
             <thead>
               <tr>
@@ -763,10 +763,9 @@ export default function App() {
                     {c.label}
                   </th>
                 ))}
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 272 : 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
-                {isAdmin && <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 192, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>}
-                <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 96, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Estado doc</th>
-                <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 96 : 96, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
+                {isAdmin && <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>}
+                {!isAdmin && <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>}
               </tr>
             </thead>
             <tbody>
@@ -775,13 +774,12 @@ export default function App() {
               ) : viajes.map(v => {
                 const completo = (v.foto_versiones?.length || 0) > 0;
                 const tieneUrl = !!v.foto_url;
-                // right sticky: lápiz=36, foto=80(solo admin), estadoDoc=96, docAdj=96
-                // admin:        lápiz right=272, foto right=192, estadoDoc right=96, docAdj right=0
-                // transportista:lápiz right=192, estadoDoc right=96, docAdj right=0
-                const rLapiz     = isAdmin ? 272 : 192;
-                const rFoto      = 192; // solo admin
-                const rEstadoDoc = 96;
-                const rDocAdj    = 0;
+                // right sticky:
+                // admin:         lápiz right=96, foto right=0
+                // transportista: lápiz right=96, doc.adj right=0
+                const rLapiz  = 96;
+                const rFoto   = 0; // solo admin
+                const rDocAdj = 0; // solo transportista
 
                 return (
                   <tr key={v.nro_spot} className="viaje-row">
@@ -790,7 +788,7 @@ export default function App() {
                       let content = v[c.key];
                       if (["resultado_ia","estado_validacion_ia"].includes(c.key)) {
                         content = <Badge value={v[c.key]} />;
-                      } else if (["estado_final","estado_ejecucion"].includes(c.key)) {
+                      } else if (["estado_final","estado_ejecucion","estado_doc"].includes(c.key)) {
                         content = v[c.key]
                           ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
@@ -831,7 +829,7 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Botones foto — solo admin */}
+                    {/* Botones foto — solo admin, sticky derecha */}
                     {isAdmin && (
                       <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                         {completo && v.foto_url && (
@@ -856,22 +854,15 @@ export default function App() {
                       </td>
                     )}
 
-                    {/* Estado doc */}
-                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rEstadoDoc, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
-                      <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 500, background: completo ? GREEN_LIGHT : RED_LIGHT, color: completo ? GREEN : RED }}>
-                        {completo ? "Completo" : "Pendiente"}
-                      </span>
-                    </td>
-
-                    {/* Doc. adjuntos — botón subir */}
-                    <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rDocAdj, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
-                      {!isAdmin && (
+                    {/* Doc. adjuntos — botón subir, solo transportista, sticky derecha */}
+                    {!isAdmin && (
+                      <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rDocAdj, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                         <button onClick={() => openModal(v)}
                           style={{ width: 28, height: 28, borderRadius: "50%", border: `1.5px solid ${completo ? GREEN : GRAY_200}`, background: "white", color: completo ? GREEN : GRAY_500, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
                           {completo ? "✓" : "↑"}
                         </button>
-                      )}
-                    </td>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
