@@ -348,14 +348,36 @@ export default function App() {
 
   async function saveEdit() {
     if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido. Usa ABC-123."); return; }
+    if (editRutas.length === 0 && editRutaInput.trim()) {
+      // Si hay texto en el input pero no se presionó +, agregarlo automáticamente
+      setEditRutas(prev => [...prev, editRutaInput.trim()]);
+      setEditRutaInput("");
+    }
     setEditSaving(true); setEditErr("");
     try {
-      const rutasStr = editRutas.join(" | ");
-      const { error } = await supabase.from("viajes").update({ placa: editPlaca || null, rutas: rutasStr || null }).eq("nro_spot", editModal.nro_spot);
+      const rutasArr = editRutaInput.trim()
+        ? [...editRutas, editRutaInput.trim()]
+        : editRutas;
+      const rutasStr = rutasArr.join(" | ");
+      const payload = { placa: editPlaca || null, rutas: rutasStr || null };
+      console.log("saveEdit payload:", payload, "nro_spot:", editModal.nro_spot);
+      const { data, error } = await supabase
+        .from("viajes")
+        .update(payload)
+        .eq("nro_spot", editModal.nro_spot)
+        .select();
+      console.log("saveEdit result:", { data, error });
       if (error) throw error;
-      setViajes(prev => prev.map(v => v.nro_spot === editModal.nro_spot ? { ...v, placa: editPlaca || null, rutas: rutasStr || null } : v));
+      setViajes(prev => prev.map(v =>
+        v.nro_spot === editModal.nro_spot
+          ? { ...v, placa: payload.placa, rutas: payload.rutas }
+          : v
+      ));
       setEditModal(null);
-    } catch (err) { setEditErr(err.message || "Error al guardar."); }
+    } catch (err) {
+      console.error("saveEdit error:", err);
+      setEditErr(err.message || "Error al guardar.");
+    }
     finally { setEditSaving(false); }
   }
 
