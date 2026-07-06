@@ -327,7 +327,11 @@ export default function App() {
   function openEditModal(viaje) {
     setEditModal(viaje);
     setEditPlaca(viaje.placa || "");
-    setEditRutas(viaje.rutas ? viaje.rutas.split("|").map(r => r.trim()).filter(Boolean) : []);
+    // rutas viene como "GR001 | Ruta Trujillo | GR002" — separar por " | " con espacios
+    const rutasArr = viaje.rutas
+      ? viaje.rutas.split(/\s*\|\s*/).map(r => r.trim()).filter(Boolean)
+      : [];
+    setEditRutas(rutasArr);
     setEditRutaInput(""); setEditErr("");
   }
 
@@ -491,7 +495,18 @@ export default function App() {
     }
   }
 
-  function openModal(viaje) { setModal(viaje); setUploadFile(null); setUploadErr(""); setUploadSuccess(false); }
+  function openModal(viaje) {
+    // Verificar que el transportista haya completado placa y rutas antes de subir
+    const faltaPlaca = !viaje.placa || viaje.placa.trim() === "";
+    const faltaRutas = !viaje.rutas || viaje.rutas.trim() === "";
+    if (faltaPlaca || faltaRutas) {
+      const campos = [faltaPlaca && "N° Placa", faltaRutas && "Ruta | N°GR | N°Carga"].filter(Boolean).join(" y ");
+      setModal({ ...viaje, _bloqueado: true, _mensajeBloqueo: campos });
+    } else {
+      setModal(viaje);
+    }
+    setUploadFile(null); setUploadErr(""); setUploadSuccess(false);
+  }
 
   function handleFileSelect(file) {
     if (!file) return;
@@ -959,11 +974,31 @@ export default function App() {
           onClick={e => e.target === e.currentTarget && setModal(null)}>
           <div style={{ background: "white", borderRadius: 14, padding: 24, width: 390, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>Subir documento</div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>{modal._bloqueado ? "Campos incompletos" : "Subir documento"}</div>
               <button onClick={() => setModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, fontFamily: "monospace" }}>{modal.nro_spot}</div>
-            {uploadSuccess ? (
+
+            {/* Vista bloqueada — faltan campos */}
+            {modal._bloqueado ? (
+              <div>
+                <div style={{ padding: "14px 16px", background: AMBER_LIGHT, borderRadius: 10, marginBottom: 18, border: `0.5px solid #e8c87a` }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: AMBER, marginBottom: 6 }}>⚠ Completa los datos del viaje</div>
+                  <div style={{ fontSize: 12, color: AMBER }}>
+                    Para subir el documento primero debes registrar: <strong>{modal._mensajeBloqueo}</strong>.
+                  </div>
+                  <div style={{ fontSize: 11, color: AMBER, marginTop: 8 }}>
+                    Usa el botón ✏️ de la fila para completar esos campos.
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button onClick={() => setModal(null)}
+                    style={{ padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>
+                    Entendido
+                  </button>
+                </div>
+              </div>
+            ) : uploadSuccess ? (
               <div style={{ textAlign: "center", padding: "24px 0" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
                 <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Documento guardado correctamente</div>
