@@ -315,7 +315,7 @@ export default function App() {
 
   useEffect(() => {
     fetchViajesRef.current = { fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor };
-  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal]);
+  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor]);
 
   async function doLogin(e) {
     e.preventDefault();
@@ -348,25 +348,19 @@ export default function App() {
 
   async function saveEdit() {
     if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido. Usa ABC-123."); return; }
-    if (editRutas.length === 0 && editRutaInput.trim()) {
-      // Si hay texto en el input pero no se presionó +, agregarlo automáticamente
-      setEditRutas(prev => [...prev, editRutaInput.trim()]);
-      setEditRutaInput("");
-    }
     setEditSaving(true); setEditErr("");
     try {
+      // Si hay texto en el input que no se confirmó con +, incluirlo al guardar
       const rutasArr = editRutaInput.trim()
         ? [...editRutas, editRutaInput.trim()]
         : editRutas;
       const rutasStr = rutasArr.join(" | ");
       const payload = { placa: editPlaca || null, rutas: rutasStr || null };
-      console.log("saveEdit payload:", payload, "nro_spot:", editModal.nro_spot);
       const { data, error } = await supabase
         .from("viajes")
         .update(payload)
         .eq("nro_spot", editModal.nro_spot)
         .select();
-      console.log("saveEdit result:", { data, error });
       if (error) throw error;
       setViajes(prev => prev.map(v =>
         v.nro_spot === editModal.nro_spot
@@ -375,7 +369,6 @@ export default function App() {
       ));
       setEditModal(null);
     } catch (err) {
-      console.error("saveEdit error:", err);
       setEditErr(err.message || "Error al guardar.");
     }
     finally { setEditSaving(false); }
@@ -587,16 +580,14 @@ export default function App() {
     try {
       const ahora = new Date().toISOString();
       const { error } = await supabase.from("viajes").update({
-        resultado_ia:        "MANUAL",
-        estado_validacion_ia:"TERMINADO",
-        detalle_ia:          "Correcto",
-        estado_final:        "FINALIZADO",
-        usuario_modif:       session.user.email,
-        fecha_modif:         ahora,
+        estado_validacion_ia: "MANUAL",
+        estado_final:         "FINALIZADO",
+        usuario_modif:        session.user.email,
+        fecha_modif:          ahora,
       }).eq("nro_spot", validModal.nro_spot);
       if (error) throw error;
       setViajes(prev => prev.map(v => v.nro_spot === validModal.nro_spot
-        ? { ...v, resultado_ia: "MANUAL", estado_validacion_ia: "TERMINADO", detalle_ia: "Correcto", estado_final: "FINALIZADO", usuario_modif: session.user.email, fecha_modif: ahora }
+        ? { ...v, estado_validacion_ia: "MANUAL", estado_final: "FINALIZADO", usuario_modif: session.user.email, fecha_modif: ahora }
         : v));
       setValidModal(null);
     } catch (err) { setValidErr(err.message || "Error al validar."); }
@@ -619,7 +610,7 @@ export default function App() {
     corteLabel = (hora >= 8 && hora < 16.5) ? `${fs} · 8:00 am` : `${fs} · 4:30 pm`;
   }
 
-  const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal;
+  const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal || fProveedor;
 
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><p style={{ color: GRAY_500, fontSize: 13 }}>Cargando...</p></div>;
 
@@ -811,9 +802,9 @@ export default function App() {
                     {c.label}
                   </th>
                 ))}
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 80, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 96, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
-                {!isAdmin && <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>}
+                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 80, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
+                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 96, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
+                {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. adjuntos</th>}
               </tr>
             </thead>
             <tbody>
@@ -821,13 +812,6 @@ export default function App() {
                 <tr><td colSpan={colsVisibles.length + 4} style={{ padding: 40, textAlign: "center", color: GRAY_500 }}>No hay registros para el rango seleccionado</td></tr>
               ) : viajes.map(v => {
                 const completo = (v.foto_versiones?.length || 0) > 0;
-                const tieneUrl = !!v.foto_url;
-                // right sticky:
-                // admin:         lápiz right=80, foto right=0
-                // transportista: lápiz right=80+96=176, foto right=96, doc.adj right=0
-                const rLapiz  = isAdmin ? 80 : 176;
-                const rFoto   = isAdmin ? 0 : 96;
-                const rDocAdj = 0;
 
                 return (
                   <tr key={v.nro_spot} className="viaje-row">
@@ -856,8 +840,8 @@ export default function App() {
                       );
                     })}
 
-                    {/* Botón lápiz / validar */}
-                    <td style={{ padding: "4px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rLapiz, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    {/* Botón Edit — lápiz/validar */}
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 80, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {!isAdmin && (
                         <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
@@ -878,7 +862,7 @@ export default function App() {
                     </td>
 
                     {/* Botones foto — visibles para todos si hay foto */}
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 0 : 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {completo && v.foto_url && (
                         <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
                           <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
@@ -900,9 +884,9 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Doc. adjuntos — botón subir, solo transportista, sticky derecha */}
+                    {/* Doc. adjuntos — solo transportista */}
                     {!isAdmin && (
-                      <td style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rDocAdj, background: "white", borderLeft: `1.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      <td style={{ padding: "8px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 0, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                         <button onClick={() => openModal(v)}
                           style={{ width: 28, height: 28, borderRadius: "50%", border: `1.5px solid ${completo ? GREEN : GRAY_200}`, background: "white", color: completo ? GREEN : GRAY_500, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
                           {completo ? "✓" : "↑"}
