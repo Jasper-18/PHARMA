@@ -370,7 +370,14 @@ export default function App() {
     setFNroSpot(dNroSpot); setFRutas(dRutas); setFPlaca(dPlaca);
     setFEstadoDoc(dEstadoDoc); setFEstFinal(dEstFinal); setFProveedor(dProveedor);
     setFDesde(dDesde); setFHasta(dHasta);
-    setTimeout(() => fetchViajes(), 0);
+    // Actualizar el ref directamente para que fetchViajes use los valores nuevos
+    // (los useEffect de React aún no habrán corrido cuando se llama fetchViajes)
+    fetchViajesRef.current = {
+      fDesde: dDesde, fHasta: dHasta, fEstadoDoc: dEstadoDoc,
+      fNroSpot: dNroSpot, fRutas: dRutas, fPlaca: dPlaca,
+      fEstFinal: dEstFinal, fProveedor: dProveedor
+    };
+    fetchViajes();
     setFilterOpen(false);
   }
 
@@ -384,7 +391,11 @@ export default function App() {
     setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
     setFNroSpot(""); setFRutas(""); setFPlaca(""); setFEstadoDoc(""); setFEstFinal(""); setFProveedor("");
     setFDesde(d.desde); setFHasta(d.hasta);
-    setTimeout(() => fetchViajes(), 0);
+    fetchViajesRef.current = {
+      fDesde: d.desde, fHasta: d.hasta, fEstadoDoc: "",
+      fNroSpot: "", fRutas: "", fPlaca: "", fEstFinal: "", fProveedor: ""
+    };
+    fetchViajes();
   }
 
   function openFilter() {
@@ -765,7 +776,7 @@ export default function App() {
             <colgroup>
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
               <col style={{ width: 36 }} />
-              {isAdmin && <col style={{ width: 80 }} />}
+              <col style={{ width: 80 }} />
               {!isAdmin && <col style={{ width: 96 }} />}
             </colgroup>
             <thead>
@@ -778,8 +789,8 @@ export default function App() {
                     {c.label}
                   </th>
                 ))}
-                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 96 : 96, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
-                {isAdmin && <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>}
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 80, zIndex: 4, borderLeft: `0.5px solid ${BORDER}` }}></th>
+                <th style={{ padding: "8px 4px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 96, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
                 {!isAdmin && <th style={{ padding: "8px 11px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `1.5px solid ${BORDER}` }}>Doc. adjuntos</th>}
               </tr>
             </thead>
@@ -790,11 +801,11 @@ export default function App() {
                 const completo = (v.foto_versiones?.length || 0) > 0;
                 const tieneUrl = !!v.foto_url;
                 // right sticky:
-                // admin:         lápiz right=96, foto right=0
-                // transportista: lápiz right=96, doc.adj right=0
-                const rLapiz  = 96;
-                const rFoto   = 0; // solo admin
-                const rDocAdj = 0; // solo transportista
+                // admin:         lápiz right=80, foto right=0
+                // transportista: lápiz right=80+96=176, foto right=96, doc.adj right=0
+                const rLapiz  = isAdmin ? 80 : 176;
+                const rFoto   = isAdmin ? 0 : 96;
+                const rDocAdj = 0;
 
                 return (
                   <tr key={v.nro_spot} className="viaje-row">
@@ -844,30 +855,28 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Botones foto — solo admin, sticky derecha */}
-                    {isAdmin && (
-                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
-                        {completo && v.foto_url && (
-                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                            <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
-                              style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                <circle cx="12" cy="12" r="3"/>
-                              </svg>
-                            </button>
-                            <button onClick={() => descargarFoto(v.foto_url, v.foto_nombre)} title="Descargar foto"
-                              style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                              </svg>
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    )}
+                    {/* Botones foto — visibles para todos si hay foto */}
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      {completo && v.foto_url && (
+                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                          <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
+                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                              <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                          </button>
+                          <button onClick={() => descargarFoto(v.foto_url, v.foto_nombre)} title="Descargar foto"
+                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                              <polyline points="7 10 12 15 17 10"/>
+                              <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                          </button>
+                        </div>
+                      )}
+                    </td>
 
                     {/* Doc. adjuntos — botón subir, solo transportista, sticky derecha */}
                     {!isAdmin && (
