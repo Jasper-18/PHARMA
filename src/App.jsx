@@ -787,7 +787,7 @@ export default function App() {
                     {c.label}
                   </th>
                 ))}
-                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 80, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
+                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 80 : 164, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
                 <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 84, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
                 {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. Adjunto</th>}
               </tr>
@@ -824,7 +824,7 @@ export default function App() {
                     })}
 
                     {/* Botón Edit — lápiz/validar */}
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 80, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 80 : 164, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {!isAdmin && (
                         <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
