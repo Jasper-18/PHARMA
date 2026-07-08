@@ -28,7 +28,7 @@ const MAX_MB = 10;
 const COLS = [
   { key: "nro_spot",            label: "N° SPOT",                  width: 210, mono: true },
   { key: "fecha_carga",         label: "Fecha Carga",              width: 100 },
-  { key: "estado_final",        label: "Estado de Viaje Final",    width: 150 },
+  { key: "estado_final",        label: "Estado Final de Viaje",    width: 150 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
   { key: "rutas",               label: "Ruta | N°GR | N°Carga",   width: 220, trunc: true, headerGroup: "transportista" },
   { key: "proveedor",           label: "Proveedor",                width: 110, adminOnly: true },
@@ -43,9 +43,10 @@ const COLS = [
   { key: "centro_costo",        label: "Centro de Costo",          width: 110, muted: true },
   { key: "detalle_servicio",    label: "Detalle del Servicio",     width: 180, trunc: true },
   { key: "estado_ejecucion",    label: "Estado Ejecución",         width: 120 },
-  { key: "estado_validacion_ia",label: "Validación IA",            width: 100, headerGroup: "ia" },
-  { key: "resultado_ia",        label: "Resultado IA",             width: 100, headerGroup: "ia" },
-  { key: "detalle_ia",          label: "Detalle IA",               width: 130, trunc: true, headerGroup: "ia" },
+  { key: "estado_procesamiento_ia", label: "Procesam. IA",         width: 100, headerGroup: "ia", adminOnly: true },
+  { key: "estado_validacion_ia",label: "Validación IA",            width: 110, headerGroup: "ia" },
+  { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia", adminOnly: true },
+  { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia", adminOnly: true },
   { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
   { key: "estado_doc",          label: "Estado Doc.",              width: 100 },
@@ -181,22 +182,6 @@ function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
         {rangoValido ? `${fmt(selStart)} – ${fmt(selEnd)}` : "Selecciona el rango de fechas"}
       </div>
     </div>
-  );
-}
-
-// Badge coloreado para campos de estado
-function Badge({ value }) {
-  if (!value) return <span style={{ color: GRAY_500 }}>—</span>;
-  const v = value.toUpperCase();
-  let bg = GRAY_100, color = GRAY_500;
-  if (v === "FINALIZADO" || v === "OK" || v === "TERMINADO" || v === "EJECUTADO" || v === "CORRECTO") { bg = GREEN_LIGHT; color = GREEN; }
-  else if (v === "PENDIENTE" || v === "NO EJECUTADO") { bg = AMBER_LIGHT; color = AMBER; }
-  else if (v === "MANUAL") { bg = BLUE_LIGHT; color = BLUE; }
-  else if (v === "BORROSO" || v === "NO COINCIDE") { bg = RED_LIGHT; color = RED_DARK; }
-  return (
-    <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" }}>
-      {value}
-    </span>
   );
 }
 
@@ -453,7 +438,7 @@ export default function App() {
       if (val === null || val === undefined) return "";
       if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc" || c.key === "fecha_carga")
         return fmtFecha(val);
-      if (c.key === "estado_ejecucion" || c.key === "estado_final" || c.key === "resultado_ia" || c.key === "estado_validacion_ia")
+      if (c.key === "estado_ejecucion" || c.key === "estado_final" || c.key === "estado_procesamiento_ia" || c.key === "estado_validacion_ia")
         return val ? String(val).toUpperCase() : "";
       if (c.key === "foto_versiones") return Array.isArray(val) ? val.length : 0;
       return String(val);
@@ -790,7 +775,7 @@ export default function App() {
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
               <col style={{ width: 36 }} />
               <col style={{ width: 80 }} />
-              {!isAdmin && <col style={{ width: 96 }} />}
+              {!isAdmin && <col style={{ width: 84 }} />}
             </colgroup>
             <thead>
               <tr>
@@ -803,8 +788,8 @@ export default function App() {
                   </th>
                 ))}
                 <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 80, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
-                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 96, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
-                {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. adjuntos</th>}
+                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 84, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
+                {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. Adjunto</th>}
               </tr>
             </thead>
             <tbody>
@@ -818,9 +803,7 @@ export default function App() {
                     {colsVisibles.map(c => {
                       const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                       let content = v[c.key];
-                      if (["resultado_ia","estado_validacion_ia"].includes(c.key)) {
-                        content = <Badge value={v[c.key]} />;
-                      } else if (["estado_final","estado_ejecucion","estado_doc"].includes(c.key)) {
+                      if (["estado_final","estado_ejecucion","estado_doc","estado_procesamiento_ia","estado_validacion_ia"].includes(c.key)) {
                         content = v[c.key]
                           ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
@@ -862,7 +845,7 @@ export default function App() {
                     </td>
 
                     {/* Botones foto — visibles para todos si hay foto */}
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 0 : 96, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 0 : 84, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {completo && v.foto_url && (
                         <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
                           <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
