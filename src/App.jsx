@@ -45,8 +45,8 @@ const COLS = [
   { key: "estado_ejecucion",    label: "Estado Ejecución",         width: 120 },
   { key: "estado_procesamiento_ia", label: "Procesam. IA",         width: 100, headerGroup: "ia", adminOnly: true },
   { key: "estado_validacion_ia",label: "Validación IA",            width: 110, headerGroup: "ia" },
-  { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia", adminOnly: true },
-  { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia", adminOnly: true },
+  { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
+  { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia" },
   { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
   { key: "estado_doc",          label: "Estado Doc.",              width: 100 },
@@ -92,14 +92,6 @@ async function comprimirImagen(file) {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function ultimos7Dias() {
-  const hoy = new Date();
-  const desde = new Date(hoy);
-  desde.setDate(hoy.getDate() - 30);
-  const fmt = d => d.toISOString().slice(0, 10);
-  return { desde: fmt(desde), hasta: fmt(hoy) };
 }
 
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -244,12 +236,13 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Al recibir la sesión, si no hay fechas guardadas en sessionStorage,
+  // Al recibir la sesión, si no hay fechas guardadas en sessionStorage PARA ESTE MISMO ROL,
   // aplica el rango por defecto según el rol: 7 días para admin, 31 para transportista
   useEffect(() => {
     if (!session) return;
-    if (_saved.fDesde && _saved.fHasta) return; // ya hay filtros guardados, no pisar
     const isAdminUser = session.user.user_metadata?.role === "admin";
+    const rolActual = isAdminUser ? "admin" : "transportista";
+    if (_saved.fDesde && _saved.fHasta && _saved._rol === rolActual) return; // mismo rol, no pisar
     const hoy = new Date();
     const desde = new Date(hoy);
     desde.setDate(hoy.getDate() - (isAdminUser ? 6 : 30));
@@ -295,8 +288,10 @@ export default function App() {
   useEffect(() => { if (session) fetchViajes(); }, [session]);
 
   useEffect(() => {
-    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor }));
-  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor]);
+    if (!session) return;
+    const rolActual = session.user.user_metadata?.role === "admin" ? "admin" : "transportista";
+    sessionStorage.setItem("ps_filters", JSON.stringify({ fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor, _rol: rolActual }));
+  }, [fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor, session]);
 
   useEffect(() => {
     fetchViajesRef.current = { fDesde, fHasta, fEstadoDoc, fNroSpot, fRutas, fPlaca, fEstFinal, fProveedor };
@@ -811,7 +806,7 @@ export default function App() {
                         content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_carga") {
                         content = v[c.key] ? fmtFecha(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (!content) {
+                      } else if (content === null || content === undefined || content === "") {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
                       return (
