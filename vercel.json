@@ -1,5 +1,0 @@
-{
-  "functions": {
-    "api/procesar-ocr.js": { "maxDuration": 15 }
-  }
-}
