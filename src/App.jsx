@@ -27,10 +27,10 @@ const MAX_MB = 10;
 // headerGroup: 'ia' = encabezado con fondo azul tenue, 'transportista' = fondo amarillo tenue
 const COLS = [
   { key: "nro_spot",            label: "N° SPOT",                  width: 210, mono: true },
-  { key: "fecha_carga",         label: "Fecha Carga",              width: 100 },
-  { key: "estado_final",        label: "Estado Final de Viaje",    width: 150 },
+  { key: "fecha_carga",         label: "Fecha Servicio",           width: 100 },
+  { key: "estado_final",        label: "Estado Final",             width: 150 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
-  { key: "rutas",               label: "Ruta | N°GR | N°Carga",   width: 220, trunc: true, headerGroup: "transportista" },
+  { key: "rutas",               label: "N° GR",                    width: 220, trunc: true, headerGroup: "transportista" },
   { key: "proveedor",           label: "Proveedor",                width: 110, adminOnly: true },
   { key: "hora_cita",           label: "Hora Cita",                width: 80 },
   { key: "cd_origen",           label: "Origen",                   width: 130 },
@@ -51,6 +51,19 @@ const COLS = [
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
   { key: "estado_doc",          label: "Estado Doc.",              width: 100 },
   { key: "fecha_entrega_doc",   label: "Fec. Entrega Doc.",        width: 130 },
+];
+
+// Vista de transportista: panel principal resumido (orden exacto solicitado)
+const COLS_TRANSPORTISTA_PRINCIPAL = [
+  "nro_spot", "fecha_carga", "estado_final", "cd_origen", "cd_destino",
+  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
+];
+
+// Vista de transportista: campos adicionales que se muestran solo en el modal de detalle
+// (excluye lo que ya está en el panel principal, y explícitamente match_ia/usuario_modif/fecha_modif/hora_cita/area)
+const COLS_TRANSPORTISTA_DETALLE = [
+  "tipo_traslado", "cantidad", "requerimiento", "centro_costo",
+  "detalle_servicio", "estado_ejecucion", "estado_doc", "fecha_entrega_doc",
 ];
 
 // Extrae el segmento "Nro..." de un nro_spot para nombrar archivos
@@ -210,6 +223,7 @@ export default function App() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [modal,        setModal]        = useState(null);
   const [editModal,    setEditModal]    = useState(null);
+  const [detalleModal, setDetalleModal] = useState(null);
   const [editPlaca,    setEditPlaca]    = useState("");
   const [editRutas,    setEditRutas]    = useState([]);
   const [editRutaInput,setEditRutaInput]= useState("");
@@ -649,7 +663,10 @@ export default function App() {
   );
 
   // Columnas visibles según rol
-  const colsVisibles = COLS.filter(c => !c.adminOnly || isAdmin);
+  const colsVisibles = isAdmin
+    ? COLS.filter(c => !c.adminOnly || isAdmin)
+    : COLS_TRANSPORTISTA_PRINCIPAL.map(key => COLS.find(c => c.key === key)).filter(Boolean);
+  const colsDetalleExtra = COLS_TRANSPORTISTA_DETALLE.map(key => COLS.find(c => c.key === key)).filter(Boolean);
 
   return (
     <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
@@ -798,6 +815,7 @@ export default function App() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
             <colgroup>
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
+              {!isAdmin && <col style={{ width: 74 }} />}
               <col style={{ width: 36 }} />
               <col style={{ width: 80 }} />
               {!isAdmin && <col style={{ width: 84 }} />}
@@ -812,6 +830,7 @@ export default function App() {
                     {c.label}
                   </th>
                 ))}
+                {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 200, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Detalle</th>}
                 <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 80 : 164, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
                 <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 84, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
                 {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. Adjunto</th>}
@@ -819,7 +838,7 @@ export default function App() {
             </thead>
             <tbody>
               {viajes.length === 0 ? (
-                <tr><td colSpan={colsVisibles.length + 4} style={{ padding: 40, textAlign: "center", color: GRAY_500 }}>No hay registros para el rango seleccionado</td></tr>
+                <tr><td colSpan={colsVisibles.length + (isAdmin ? 2 : 4)} style={{ padding: 40, textAlign: "center", color: GRAY_500 }}>No hay registros para el rango seleccionado</td></tr>
               ) : viajes.map(v => {
                 const completo = (v.foto_versiones?.length || 0) > 0;
 
@@ -848,7 +867,16 @@ export default function App() {
                       );
                     })}
 
-                    {/* Botón Edit — lápiz/validar */}
+                    {/* Botón Detalle — solo transportista, abre modal con campos extendidos */}
+                    {!isAdmin && (
+                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 200, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                        <button onClick={() => setDetalleModal(v)} title="Ver detalle completo"
+                          style={{ padding: "5px 10px", borderRadius: 7, border: `1px solid ${BORDER}`, background: GRAY_50, cursor: "pointer", fontSize: 10, fontWeight: 500, color: GRAY_900 }}>
+                          Detalle
+                        </button>
+                      </td>
+                    )}
+
                     <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 80 : 164, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {!isAdmin && (
                         <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
@@ -910,6 +938,43 @@ export default function App() {
       </div>
 
       {/* MODAL EDICIÓN PLACA / RUTAS */}
+      {/* MODAL DETALLE — vista transportista, campos extendidos fuera del panel principal */}
+      {detalleModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && setDetalleModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Detalle del viaje</div>
+              <button onClick={() => setDetalleModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{detalleModal.nro_spot}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {colsDetalleExtra.map(c => {
+                let val = detalleModal[c.key];
+                if (c.key === "fecha_entrega_doc") {
+                  val = val ? fmtFechaHora(val) : "—";
+                } else if (c.key === "estado_ejecucion" || c.key === "estado_doc") {
+                  val = val ? String(val).toUpperCase() : "—";
+                } else if (c.right) {
+                  val = (val === null || val === undefined || val === "") ? "—" : val;
+                } else if (val === null || val === undefined || val === "") {
+                  val = "—";
+                }
+                return (
+                  <div key={c.key}>
+                    <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3 }}>{c.label}</div>
+                    <div style={{ fontSize: 13, color: GRAY_900 }}>{val}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+              <button onClick={() => setDetalleModal(null)} style={{ padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && !editSaving && setEditModal(null)}>
@@ -926,7 +991,7 @@ export default function App() {
                 style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
             </div>
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>Ruta | N°GR | N°Carga</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° GR</div>
               {editRutas.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                   {editRutas.map((r, i) => (
