@@ -30,7 +30,7 @@ const COLS = [
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 100 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
-  { key: "rutas",               label: "N° GR",                    width: 220, trunc: true, headerGroup: "transportista" },
+  { key: "rutas",               label: "N° GR",                    width: 180, trunc: true, headerGroup: "transportista" },
   { key: "proveedor",           label: "Proveedor",                width: 110, adminOnly: true },
   { key: "hora_cita",           label: "Hora Cita",                width: 80 },
   { key: "cd_origen",           label: "Origen",                   width: 130 },
@@ -39,7 +39,7 @@ const COLS = [
   { key: "cantidad",            label: "Cantidad",                 width: 80,  right: true },
   { key: "area",                label: "Área",                     width: 120 },
   { key: "requerimiento",       label: "Requerimiento",            width: 160, trunc: true },
-  { key: "importe",             label: "Importe S/",               width: 90,  right: true },
+  { key: "importe",             label: "Importe",                  width: 90,  right: true },
   { key: "centro_costo",        label: "Centro de Costo",          width: 110, muted: true },
   { key: "detalle_servicio",    label: "Detalle del Servicio",     width: 180, trunc: true },
   { key: "estado_ejecucion",    label: "Estado Ejecución",         width: 120 },
@@ -56,13 +56,13 @@ const COLS = [
 // Vista de transportista: panel principal resumido (orden exacto solicitado)
 const COLS_TRANSPORTISTA_PRINCIPAL = [
   "nro_spot", "fecha_carga", "estado_final", "cd_origen", "cd_destino",
-  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
+  "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
 ];
 
 // Vista de transportista: campos adicionales que se muestran solo en el modal de detalle
 // (excluye lo que ya está en el panel principal, y explícitamente match_ia/usuario_modif/fecha_modif/hora_cita/area)
 const COLS_TRANSPORTISTA_DETALLE = [
-  "tipo_traslado", "cantidad", "requerimiento", "centro_costo",
+  "importe", "tipo_traslado", "cantidad", "requerimiento", "centro_costo",
   "detalle_servicio", "estado_ejecucion", "estado_doc", "fecha_entrega_doc",
 ];
 
@@ -442,7 +442,8 @@ export default function App() {
 
   function exportarExcel() {
     if (!viajes.length) return;
-    const colsExp = colsVisibles;
+    // Exporta siempre el set completo de columnas (según rol), no el panel resumido en pantalla
+    const colsExp = COLS.filter(c => !c.adminOnly || isAdmin);
     const headers = colsExp.map(c => c.label);
     const rows = viajes.map(v => colsExp.map(c => {
       const val = v[c.key];
@@ -847,7 +848,14 @@ export default function App() {
                     {colsVisibles.map(c => {
                       const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                       let content = v[c.key];
-                      if (["estado_final","estado_ejecucion","estado_doc","estado_procesamiento_ia","estado_validacion_ia"].includes(c.key)) {
+                      if (c.key === "estado_final") {
+                        const ef = v.estado_final;
+                        const bg = ef === "FINALIZADO" ? GREEN_LIGHT : ef === "PENDIENTE" ? AMBER_LIGHT : GRAY_100;
+                        const fg = ef === "FINALIZADO" ? GREEN : ef === "PENDIENTE" ? AMBER : GRAY_500;
+                        content = ef
+                          ? <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{ef}</span>
+                          : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (["estado_ejecucion","estado_doc","estado_procesamiento_ia","estado_validacion_ia"].includes(c.key)) {
                         content = v[c.key]
                           ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
