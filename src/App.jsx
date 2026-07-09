@@ -220,6 +220,8 @@ export default function App() {
   const [uploadFile,   setUploadFile]   = useState(null);
   const [uploadErr,    setUploadErr]    = useState("");
   const [uploadSuccess,setUploadSuccess]= useState(false);
+  const [validandoIA,  setValidandoIA]  = useState(false);
+  const [resultadoIA,  setResultadoIA]  = useState(null);
 
   // Estado modal validación admin
   const [validModal,   setValidModal]   = useState(null);
@@ -511,7 +513,7 @@ export default function App() {
     } else {
       setModal(viaje);
     }
-    setUploadFile(null); setUploadErr(""); setUploadSuccess(false);
+    setUploadFile(null); setUploadErr(""); setUploadSuccess(false); setValidandoIA(false); setResultadoIA(null);
   }
 
   function handleFileSelect(file) {
@@ -544,13 +546,41 @@ export default function App() {
         subido_en:         ahora,
         fecha_entrega_doc: versiones.length === 0 ? ahora : modal.fecha_entrega_doc,
         estado_doc:        "Completo",
+        estado_procesamiento_ia: null, // resetea para forzar re-validación de esta nueva foto
       }).eq("nro_spot", modal.nro_spot);
       if (dbErr) throw dbErr;
+
+      // La foto ya está guardada de forma segura en este punto — lo que sigue
+      // (validación IA en vivo) es una mejora de UX, no puede hacer fallar la subida.
+      setUploading(false);
+      setValidandoIA(true);
+
+      let resultado = null;
+      try {
+        const resp = await fetch("/api/procesar-ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nro_spot: modal.nro_spot }),
+        });
+        if (resp.ok) resultado = await resp.json();
+      } catch { /* sin internet momentáneo, timeout, etc. — el batch la recoge después */ }
+
+      setValidandoIA(false);
+      setResultadoIA(resultado); // null si falló — se muestra mensaje genérico
+      setViajes(prev => prev.map(v => v.nro_spot === modal.nro_spot
+        ? { ...v, foto_versiones: nuevasVersiones, foto_url: path, foto_nombre: fileName,
+            subido_por: session.user.email, subido_en: ahora, estado_doc: "Completo",
+            ...(resultado || {}) }
+        : v));
+
       setUploadSuccess(true);
       fetchViajes();
-      setTimeout(() => setModal(null), 1600);
-    } catch (err) { setUploadErr(err.message || "Error al subir el archivo."); }
-    finally { setUploading(false); }
+      const cierraSolo = !resultado || resultado.estado_validacion_ia !== "NO_COINCIDE";
+      if (cierraSolo) setTimeout(() => { setModal(null); setResultadoIA(null); }, 2200);
+    } catch (err) {
+      setUploadErr(err.message || "Error al subir el archivo.");
+      setUploading(false);
+    }
   }
 
   // Validación manual por admin
@@ -993,8 +1023,35 @@ export default function App() {
               </div>
             ) : uploadSuccess ? (
               <div style={{ textAlign: "center", padding: "24px 0" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Documento guardado correctamente</div>
+                {!resultadoIA ? (
+                  <>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                    <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Documento guardado correctamente</div>
+                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 6 }}>La validación automática se completará en breve.</div>
+                  </>
+                ) : resultadoIA.estado_validacion_ia === "COINCIDE" ? (
+                  <>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                    <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Documento validado correctamente</div>
+                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 6 }}>Coincidencia: {resultadoIA.match_ia}%</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+                    <div style={{ fontSize: 13, color: AMBER, fontWeight: 500 }}>El documento no coincide con lo registrado</div>
+                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 6 }}>Detectado: {resultadoIA.texto_detectado_ia || "—"} ({resultadoIA.match_ia ?? 0}%)</div>
+                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 4 }}>Un administrador revisará tu documento.</div>
+                    <button onClick={() => { setModal(null); setResultadoIA(null); }}
+                      style={{ marginTop: 14, padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>
+                      Entendido
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : validandoIA ? (
+              <div style={{ textAlign: "center", padding: "24px 0" }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+                <div style={{ fontSize: 13, color: GRAY_500 }}>Validando documento...</div>
               </div>
             ) : (
               <>
