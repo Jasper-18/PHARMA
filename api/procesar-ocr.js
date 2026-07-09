@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import fuzz from 'fuzzball';
+import { partial_ratio } from 'fuzzball';
 
 const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const UMBRAL_COINCIDENCIA = 95;
@@ -32,7 +32,7 @@ function compararConRutas(rutasStr, textoOcr) {
   for (const item of items) {
     const itemNorm = normalizar(item);
     if (!itemNorm) continue;
-    const score = fuzz.partial_ratio(itemNorm, textoNorm);
+    const score = partial_ratio(itemNorm, textoNorm);
     if (score > mejorScore) {
       mejorScore = score;
       mejorItem = item;
