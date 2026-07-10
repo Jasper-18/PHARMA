@@ -62,7 +62,7 @@ const COLS_TRANSPORTISTA_PRINCIPAL = [
 // Vista de transportista: campos adicionales que se muestran solo en el modal de detalle
 // (excluye lo que ya está en el panel principal, y explícitamente match_ia/usuario_modif/fecha_modif/hora_cita/area)
 const COLS_TRANSPORTISTA_DETALLE = [
-  "importe", "tipo_traslado", "cantidad", "requerimiento", "centro_costo",
+  "importe", "tipo_traslado", "cantidad", "requerimiento",
   "detalle_servicio", "estado_ejecucion", "estado_doc", "fecha_entrega_doc",
 ];
 
@@ -225,7 +225,6 @@ export default function App() {
   const [editModal,    setEditModal]    = useState(null);
   const [detalleModal, setDetalleModal] = useState(null);
   const [editPlaca,    setEditPlaca]    = useState("");
-  const [editRutas,    setEditRutas]    = useState([]);
   const [editRutaInput,setEditRutaInput]= useState("");
   const [editSaving,   setEditSaving]   = useState(false);
   const [editErr,      setEditErr]      = useState("");
@@ -323,22 +322,9 @@ export default function App() {
   function openEditModal(viaje) {
     setEditModal(viaje);
     setEditPlaca(viaje.placa || "");
-    // rutas viene como "GR001 | Ruta Trujillo | GR002" — separar por " | " con espacios
-    const rutasArr = viaje.rutas
-      ? viaje.rutas.split(/\s*\|\s*/).map(r => r.trim()).filter(Boolean)
-      : [];
-    setEditRutas(rutasArr);
-    setEditRutaInput(""); setEditErr("");
+    setEditRutaInput(viaje.rutas || "");
+    setEditErr("");
   }
-
-  function addRuta() {
-    const val = editRutaInput.trim();
-    if (!val) return;
-    if (editRutas.includes(val)) { setEditErr("Esa ruta ya está en la lista."); return; }
-    setEditRutas(prev => [...prev, val]); setEditRutaInput(""); setEditErr("");
-  }
-
-  function removeRuta(idx) { setEditRutas(prev => prev.filter((_, i) => i !== idx)); }
 
   const PLACA_RE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
 
@@ -346,12 +332,7 @@ export default function App() {
     if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido. Usa ABC-123."); return; }
     setEditSaving(true); setEditErr("");
     try {
-      // Si hay texto en el input que no se confirmó con +, incluirlo al guardar
-      const rutasArr = editRutaInput.trim()
-        ? [...editRutas, editRutaInput.trim()]
-        : editRutas;
-      const rutasStr = rutasArr.join(" | ");
-      const payload = { placa: editPlaca || null, rutas: rutasStr || null };
+      const payload = { placa: editPlaca || null, rutas: editRutaInput.trim() || null };
       const { data, error } = await supabase
         .from("viajes")
         .update(payload)
@@ -1000,23 +981,11 @@ export default function App() {
             </div>
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° GR</div>
-              {editRutas.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                  {editRutas.map((r, i) => (
-                    <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "#FFFBF0", border: `1px solid ${BORDER}`, borderRadius: 999, fontSize: 11, color: GRAY_900 }}>
-                      {r}
-                      <button onClick={() => removeRuta(i)} style={{ background: "none", border: "none", cursor: "pointer", color: GRAY_500, fontSize: 11, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>✕</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={editRutaInput} onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
-                  onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addRuta())}
-                  style={{ ...inp, flex: 1, background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
-                <button onClick={addRuta} style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${BORDER}`, background: "#FFFBF0", color: GRAY_900, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
-              </div>
-              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter o + para agregar.</div>
+              <input value={editRutaInput} onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
+                onKeyDown={e => e.key === "Enter" && (e.preventDefault(), !editSaving && saveEdit())}
+                placeholder="Ej. 1510-0011001"
+                style={{ ...inp, width: "100%", boxSizing: "border-box", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter para guardar.</div>
             </div>
             {editErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>⚠ {editErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
