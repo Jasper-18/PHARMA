@@ -398,6 +398,21 @@ export default function App() {
     setFilterOpen(true);
   }
 
+  // Para columnas tipo DATE puro (solo calendario, ej. fecha_carga = "2026-07-12").
+  // Se parsea directo de los dígitos, SIN pasar por new Date(): new Date() interpreta
+  // ese texto como medianoche UTC, y en Perú (UTC-5) eso corre el día hacia atrás al
+  // convertir a hora local (12 → 11). No hay ninguna zona horaria que aplicar aquí,
+  // porque una fecha tipo DATE no es un instante, es un día del calendario.
+  const fmtFechaSolo = (val) => {
+    if (!val) return "";
+    const m = String(val).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    return String(val);
+  };
+
+  // Para TIMESTAMPTZ reales (fecha_modif, fecha_entrega_doc, subido_en) — estos sí
+  // son un instante con hora y zona horaria, así que SÍ corresponde convertir a
+  // hora local del navegador.
   const fmtFecha = (val) => {
     if (!val) return "";
     const d = new Date(val);
@@ -430,7 +445,9 @@ export default function App() {
     const rows = viajes.map(v => colsExp.map(c => {
       const val = v[c.key];
       if (val === null || val === undefined) return "";
-      if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc" || c.key === "fecha_carga")
+      if (c.key === "fecha_carga")
+        return fmtFechaSolo(val);
+      if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc")
         return fmtFecha(val);
       if (c.key === "realizado" || c.key === "estado_final" || c.key === "estado_procesamiento_ia" || c.key === "estado_validacion_ia")
         return val ? String(val).toUpperCase() : "";
@@ -844,7 +861,7 @@ export default function App() {
                       } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
                         content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_carga") {
-                        content = v[c.key] ? fmtFecha(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
+                        content = v[c.key] ? fmtFechaSolo(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (content === null || content === undefined || content === "") {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
