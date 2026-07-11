@@ -26,13 +26,14 @@ const MAX_MB = 10;
 // Orden de columnas según diseño acordado (posición 6 = Proveedor, solo visible para admin)
 // headerGroup: 'ia' = encabezado con fondo azul tenue, 'transportista' = fondo amarillo tenue
 const COLS = [
-  { key: "nro_spot",            label: "N° SPOT",                  width: 210, mono: true },
-  { key: "fecha_carga",         label: "Fecha Servicio",           width: 100 },
+  { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
+  { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
-  { key: "rutas",               label: "N° GR",                    width: 180, trunc: true, headerGroup: "transportista" },
+  { key: "rutas",               label: "N° GR",                    width: 140, trunc: true, headerGroup: "transportista" },
+  { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
   { key: "proveedor",           label: "Proveedor",                width: 110, adminOnly: true },
-  { key: "hora_cita",           label: "Hora Cita",                width: 80 },
+  { key: "hora_cita",           label: "Hora Cita",                width: 70 },
   { key: "cd_origen",           label: "Origen",                   width: 130 },
   { key: "cd_destino",          label: "Destino",                  width: 130 },
   { key: "tipo_traslado",       label: "Tipo de Envío",            width: 90 },
@@ -40,12 +41,11 @@ const COLS = [
   { key: "area",                label: "Área",                     width: 120 },
   { key: "requerimiento",       label: "Requerimiento",            width: 160, trunc: true },
   { key: "importe",             label: "Importe",                  width: 90,  right: true },
-  { key: "centro_costo",        label: "Centro de Costo",          width: 110, muted: true },
+  { key: "centro_costo",        label: "CECO",                     width: 110, muted: true },
   { key: "detalle_servicio",    label: "Detalle del Servicio",     width: 180, trunc: true },
-  { key: "realizado",    label: "Realizado",                width: 120 },
+  { key: "realizado",    label: "Realizado",                width: 80 },
   { key: "estado_procesamiento_ia", label: "Procesam. IA",         width: 100, headerGroup: "ia", adminOnly: true },
   { key: "estado_validacion_ia",label: "Validación IA",            width: 110, headerGroup: "ia" },
-  { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
   { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia" },
   { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
@@ -72,6 +72,34 @@ function extraerNroSpotCorto(nroSpot) {
   if (!nroSpot) return "doc";
   const m = String(nroSpot).match(/(Nro\d+)/i);
   return m ? m[1] : nroSpot.replace(/\s+/g, "_").slice(0, 30);
+}
+
+// Calcula el rango de fechas por defecto anclado en la fecha_carga MÁS RECIENTE
+// que exista en la data (no en "hoy"), porque los servicios suelen programarse
+// para el día siguiente -- si se ancla en "hoy", un registro con fecha de mañana
+// queda fuera del rango justo el día que se crea.
+async function calcularRangoAncla_(isAdminUser, empresaId) {
+  let ancla = new Date(); // fallback si no hay data o falla la consulta
+  try {
+    let q = supabase
+      .from("viajes")
+      .select("fecha_carga")
+      .eq("realizado", "SI")
+      .not("fecha_carga", "is", null)
+      .order("fecha_carga", { ascending: false })
+      .limit(1);
+    if (!isAdminUser && empresaId) q = q.eq("proveedor", empresaId);
+    const { data } = await q;
+    if (data && data[0] && data[0].fecha_carga) {
+      // Parseo local (sin "Z"), para no correr el día por interpretación UTC
+      ancla = new Date(data[0].fecha_carga + "T00:00:00");
+    }
+  } catch { /* si falla, se queda con "hoy" como ancla */ }
+
+  const desde = new Date(ancla);
+  desde.setDate(ancla.getDate() - (isAdminUser ? 6 : 30));
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { desde: fmt(desde), hasta: fmt(ancla) };
 }
 
 async function comprimirImagen(file) {
@@ -228,7 +256,6 @@ export default function App() {
   const [editRutaInput,setEditRutaInput]= useState("");
   const [editSaving,   setEditSaving]   = useState(false);
   const [editErr,      setEditErr]      = useState("");
-  const [corteInfo,    setCorteInfo]    = useState(null);
   const [uploading,    setUploading]    = useState(false);
   const [uploadFile,   setUploadFile]   = useState(null);
   const [uploadErr,    setUploadErr]    = useState("");
@@ -252,18 +279,18 @@ export default function App() {
   }, []);
 
   // Al recibir la sesión, si no hay fechas guardadas en sessionStorage PARA ESTE MISMO ROL,
-  // aplica el rango por defecto según el rol: 7 días para admin, 31 para transportista
+  // aplica el rango por defecto según el rol: 7 días para admin, 31 para transportista —
+  // anclado en la fecha_carga más reciente de la data, no en "hoy" (ver calcularRangoAncla_)
   useEffect(() => {
     if (!session) return;
     const isAdminUser = session.user.user_metadata?.role === "admin";
     const rolActual = isAdminUser ? "admin" : "transportista";
     if (_saved.fDesde && _saved.fHasta && _saved._rol === rolActual) return; // mismo rol, no pisar
-    const hoy = new Date();
-    const desde = new Date(hoy);
-    desde.setDate(hoy.getDate() - (isAdminUser ? 6 : 30));
-    const fmt = d => d.toISOString().slice(0, 10);
-    setFDesde(fmt(desde));
-    setFHasta(fmt(hoy));
+    (async () => {
+      const { desde, hasta } = await calcularRangoAncla_(isAdminUser, session.user.user_metadata?.empresa_id);
+      setFDesde(desde);
+      setFHasta(hasta);
+    })();
   }, [session]);
 
   useEffect(() => {
@@ -294,11 +321,6 @@ export default function App() {
     if (filters.fEstadoDoc === "Pendiente") rows = rows.filter(r => !(r.foto_versiones?.length > 0));
     setViajes(rows);
     setDataLoading(false);
-    const ahora = new Date();
-    const hora  = ahora.getHours() + ahora.getMinutes() / 60;
-    const fechaStr = ahora.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
-    if (hora >= 8  && hora < 10) setCorteInfo({ label: `${fechaStr} · 8:30 am` });
-    else if (hora >= 16 && hora < 19) setCorteInfo({ label: `${fechaStr} · 4:00 pm` });
   }, [session]);
 
   useEffect(() => { if (session) fetchViajes(); }, [session]);
@@ -374,12 +396,9 @@ export default function App() {
     setFilterOpen(false);
   }
 
-  function clearFilters() {
-    const hoy = new Date();
-    const desde = new Date(hoy);
-    desde.setDate(hoy.getDate() - (isAdmin ? 6 : 30));
-    const fmt = d => d.toISOString().slice(0, 10);
-    const d = { desde: fmt(desde), hasta: fmt(hoy) };
+  async function clearFilters() {
+    const { desde, hasta } = await calcularRangoAncla_(isAdmin, meta?.empresa_id);
+    const d = { desde, hasta };
     setDNroSpot(""); setDRutas(""); setDPlaca(""); setDEstadoDoc(""); setDEstFinal(""); setDProveedor("");
     setDDesde(d.desde); setDHasta(d.hasta); setFechaErr("");
     setFNroSpot(""); setFRutas(""); setFPlaca(""); setFEstadoDoc(""); setFEstFinal(""); setFProveedor("");
@@ -624,16 +643,6 @@ export default function App() {
   const initials= (session?.user?.email || "U").substring(0, 2).toUpperCase();
   const inp     = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
 
-  let corteLabel = corteInfo?.label;
-  if (!corteLabel) {
-    const ahora = new Date();
-    const hora  = ahora.getHours() + ahora.getMinutes() / 60;
-    const fCorte = new Date(ahora);
-    if (hora < 8) fCorte.setDate(fCorte.getDate() - 1);
-    const fs = fCorte.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "2-digit" });
-    corteLabel = (hora >= 8 && hora < 16.5) ? `${fs} · 8:00 am` : `${fs} · 4:30 pm`;
-  }
-
   const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal || fProveedor;
 
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><p style={{ color: GRAY_500, fontSize: 13 }}>Cargando...</p></div>;
@@ -680,11 +689,6 @@ export default function App() {
         <img src="/logo_fape.png" alt="FP" style={{ width: 36, height: 36, borderRadius: 7, background: "white", objectFit: "contain", padding: 2, flexShrink: 0 }} />
         <span style={{ fontSize: 19, fontWeight: 700, color: "white", letterSpacing: "-.3px" }}>Pharma<span style={{ opacity: .5, fontWeight: 400 }}>SPOT</span></span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "5px 10px" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#5DCAA5", flexShrink: 0 }} />
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,.6)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 500 }}>Último Corte</div>
-            <div style={{ fontSize: 11, color: "white", fontWeight: 500 }}>{corteLabel}</div>
-          </div>
           <div ref={userMenuRef} style={{ position: "relative" }}>
             <button onClick={() => setUserMenuOpen(o => !o)}
               style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,.2)", border: "1.5px solid rgba(255,255,255,.35)", color: "white", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -862,6 +866,12 @@ export default function App() {
                         content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_carga") {
                         content = v[c.key] ? fmtFechaSolo(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (c.key === "hora_cita") {
+                        // Google Sheets guarda columnas "solo hora" con una fecha base (epoch 1899),
+                        // así que el valor puede llegar como "Sat Dec 30 1899 09:00:00..." — se extrae
+                        // solo el HH:MM sin importar el resto del texto.
+                        const m = v[c.key] ? String(v[c.key]).match(/(\d{1,2}:\d{2})/) : null;
+                        content = m ? m[1] : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (content === null || content === undefined || content === "") {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
