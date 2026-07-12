@@ -252,6 +252,12 @@ export default function App() {
   const [modal,        setModal]        = useState(null);
   const [editModal,    setEditModal]    = useState(null);
   const [detalleModal, setDetalleModal] = useState(null);
+  const [pwModalOpen,  setPwModalOpen]  = useState(false);
+  const [pwNueva,      setPwNueva]      = useState("");
+  const [pwConfirma,   setPwConfirma]   = useState("");
+  const [pwErr,        setPwErr]        = useState("");
+  const [pwSaving,     setPwSaving]     = useState(false);
+  const [pwOk,         setPwOk]         = useState(false);
   const [editPlaca,    setEditPlaca]    = useState("");
   const [editRutaInput,setEditRutaInput]= useState("");
   const [editSaving,   setEditSaving]   = useState(false);
@@ -340,6 +346,30 @@ export default function App() {
     setLoginErr("");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) setLoginErr("Usuario o contraseña incorrectos");
+  }
+
+  async function cambiarPassword() {
+    setPwErr("");
+    if (pwNueva.length < 6) { setPwErr("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (pwNueva !== pwConfirma) { setPwErr("Las contraseñas no coinciden."); return; }
+    setPwSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pwNueva });
+      if (error) throw error;
+      setPwOk(true);
+      setPwNueva(""); setPwConfirma("");
+      setTimeout(() => { setPwModalOpen(false); setPwOk(false); }, 1800);
+    } catch (err) {
+      setPwErr(err.message || "Error al cambiar la contraseña.");
+    } finally {
+      setPwSaving(false);
+    }
+  }
+
+  function abrirModalPassword() {
+    setUserMenuOpen(false);
+    setPwNueva(""); setPwConfirma(""); setPwErr(""); setPwOk(false);
+    setPwModalOpen(true);
   }
 
   function openEditModal(viaje) {
@@ -700,6 +730,10 @@ export default function App() {
                   <div style={{ fontSize: 12, fontWeight: 500, color: GRAY_900 }}>{session.user.email}</div>
                   <div style={{ fontSize: 10, color: GRAY_500, marginTop: 2 }}>{isAdmin ? "Administrador" : empresa}</div>
                 </div>
+                <button onClick={abrirModalPassword}
+                  style={{ width: "100%", padding: "8px 14px", background: "none", border: "none", textAlign: "left", fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
+                  Cambiar contraseña
+                </button>
                 <button onClick={() => supabase.auth.signOut()}
                   style={{ width: "100%", padding: "8px 14px", background: "none", border: "none", textAlign: "left", fontSize: 12, color: RED, cursor: "pointer" }}>
                   Cerrar sesión
@@ -955,6 +989,52 @@ export default function App() {
       </div>
 
       {/* MODAL EDICIÓN PLACA / RUTAS */}
+      {/* MODAL CAMBIAR CONTRASEÑA */}
+      {pwModalOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && !pwSaving && setPwModalOpen(false)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 360, maxWidth: "94vw" }}>
+            {pwOk ? (
+              <div style={{ textAlign: "center", padding: "20px 0" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Contraseña actualizada</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>Cambiar contraseña</div>
+                  <button onClick={() => !pwSaving && setPwModalOpen(false)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Nueva contraseña</div>
+                  <input type="password" value={pwNueva} onChange={e => { setPwNueva(e.target.value); setPwErr(""); }}
+                    onKeyDown={e => e.key === "Enter" && !pwSaving && cambiarPassword()}
+                    style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Confirmar contraseña</div>
+                  <input type="password" value={pwConfirma} onChange={e => { setPwConfirma(e.target.value); setPwErr(""); }}
+                    onKeyDown={e => e.key === "Enter" && !pwSaving && cambiarPassword()}
+                    style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ fontSize: 10, color: GRAY_500, marginBottom: 12 }}>Mínimo 6 caracteres.</div>
+                {pwErr && <div style={{ fontSize: 11, color: RED, marginBottom: 10 }}>{pwErr}</div>}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button onClick={() => setPwModalOpen(false)} disabled={pwSaving}
+                    style={{ padding: "7px 16px", background: "none", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: pwSaving ? "default" : "pointer", color: GRAY_500 }}>
+                    Cancelar
+                  </button>
+                  <button onClick={cambiarPassword} disabled={pwSaving || !pwNueva || !pwConfirma}
+                    style={{ padding: "7px 16px", background: (pwSaving || !pwNueva || !pwConfirma) ? GRAY_200 : RED, color: (pwSaving || !pwNueva || !pwConfirma) ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: (pwSaving || !pwNueva || !pwConfirma) ? "default" : "pointer" }}>
+                    {pwSaving ? "Guardando..." : "Guardar"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* MODAL DETALLE — vista transportista, campos extendidos fuera del panel principal */}
       {detalleModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
