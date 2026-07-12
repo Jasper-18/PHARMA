@@ -571,7 +571,7 @@ export default function App() {
     const faltaPlaca = !viaje.placa || viaje.placa.trim() === "";
     const faltaRutas = !viaje.rutas || viaje.rutas.trim() === "";
     if (faltaPlaca || faltaRutas) {
-      const campos = [faltaPlaca && "N° Placa", faltaRutas && "Ruta | N°GR | N°Carga"].filter(Boolean).join(" y ");
+      const campos = [faltaPlaca && "N° Placa", faltaRutas && "N° GR"].filter(Boolean).join(" y ");
       setModal({ ...viaje, _bloqueado: true, _mensajeBloqueo: campos });
     } else {
       setModal(viaje);
@@ -792,7 +792,7 @@ export default function App() {
                 <input value={dNroSpot} onChange={e => setDNroSpot(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Ruta | N°GR | N°Carga</div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>N° GR</div>
                 <input value={dRutas} onChange={e => setDRutas(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               </div>
               {isAdmin && (
@@ -1091,7 +1091,6 @@ export default function App() {
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° GR</div>
               <input value={editRutaInput} onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
                 onKeyDown={e => e.key === "Enter" && (e.preventDefault(), !editSaving && saveEdit())}
-                placeholder="Ej. 1510-0011001"
                 style={{ ...inp, width: "100%", boxSizing: "border-box", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
               <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter para guardar.</div>
             </div>
