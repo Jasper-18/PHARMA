@@ -910,7 +910,7 @@ export default function App() {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
                       return (
-                        <td key={c.key} title={c.trunc ? (v[c.key] || "") : undefined}
+                        <td key={c.key} title={(v[c.key] !== null && v[c.key] !== undefined && v[c.key] !== "") ? String(v[c.key]) : undefined}
                           data-editable={editable ? "1" : undefined}
                           style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
                           {content}
