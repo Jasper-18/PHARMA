@@ -263,6 +263,8 @@ export default function App() {
   const [detallePagina, setDetallePagina] = useState(0);
   const [dashLoading, setDashLoading] = useState(false);
   const [detalleAbierto, setDetalleAbierto] = useState(false);
+  const [rankingSortCol, setRankingSortCol] = useState(null);
+  const [rankingSortDir, setRankingSortDir] = useState("desc");
   const DETALLE_POR_PAGINA = 10;
   const [pwModalOpen,  setPwModalOpen]  = useState(false);
   const [pwNueva,      setPwNueva]      = useState("");
@@ -806,6 +808,23 @@ export default function App() {
         </div>
       </div>
 
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* SIDEBAR */}
+        {isAdmin && (
+          <div style={{ width: 190, background: "white", borderRight: `0.5px solid ${BORDER}`, flexShrink: 0, display: "flex", flexDirection: "column", padding: "14px 10px" }}>
+            <button onClick={() => setVista("tabla")}
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "tabla" ? RED_LIGHT : "transparent", color: vista === "tabla" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "tabla" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
+              <span style={{ fontSize: 14 }}>📋</span> Seguimiento Adicionales
+            </button>
+            <button onClick={() => setVista("dashboard")}
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard" ? RED_LIGHT : "transparent", color: vista === "dashboard" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard" ? 600 : 500, cursor: "pointer", textAlign: "left" }}>
+              <span style={{ fontSize: 14 }}>📊</span> Dashboard
+            </button>
+          </div>
+        )}
+
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
       {/* TOOLBAR */}
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
@@ -816,12 +835,6 @@ export default function App() {
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
           )}
         </div>
-        {isAdmin && (
-          <button onClick={() => setVista(vista === "tabla" ? "dashboard" : "tabla")}
-            style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${vista === "dashboard" ? RED : BORDER}`, background: vista === "dashboard" ? RED : "white", color: vista === "dashboard" ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
-            {vista === "dashboard" ? "Ver tabla" : "Ver dashboard"}
-          </button>
-        )}
         {vista === "tabla" && (
           <>
             {/* Exportar Excel */}
@@ -1078,12 +1091,9 @@ export default function App() {
               </select>
             </div>
             <div>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro desde</div>
-              <input type="date" value={dashDesde} onChange={e => setDashDesde(e.target.value)} style={{ ...inp, width: 150 }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro hasta</div>
-              <input type="date" value={dashHasta} onChange={e => setDashHasta(e.target.value)} style={{ ...inp, width: 150 }} />
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro</div>
+              <RangePicker desde={dashDesde} hasta={dashHasta} maxDias={90}
+                onChange={({ desde, hasta }) => { setDashDesde(desde); setDashHasta(hasta); }} />
             </div>
             <button onClick={limpiarFiltrosDashboard} style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 12 }}>
               Limpiar filtros
@@ -1119,20 +1129,21 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Cascada — tipo escalón real, cada barra a su altura correspondiente */}
+              {/* Cascada — tipo escalón real, tonalidades de rojo FAPE */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
                 {(() => {
                   const total = kpis.total_tickets || 0;
                   const ALTO_PX = 150;
                   const escala = total > 0 ? ALTO_PX / total : 0;
+                  const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
 
                   let acumulado = total;
                   const restas = [
-                    { label: "No validados", val: kpis.cascada_no_validados || 0, color: GRAY_200 },
-                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: GRAY_500 },
-                    { label: "Pendiente subir", val: kpis.cascada_pendiente_subir || 0, color: AMBER },
-                    { label: "Pendiente validar / Error IA", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK },
+                    { label: "No validados", val: kpis.cascada_no_validados || 0, color: RED_LIGHT, textColor: RED_DARK },
+                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#F0AAB4", textColor: RED_DARK },
+                    { label: "Pendiente subir", val: kpis.cascada_pendiente_subir || 0, color: "#DC5570", textColor: "white" },
+                    { label: "Pendiente validar / Error IA", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK, textColor: "white" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado };
@@ -1141,9 +1152,9 @@ export default function App() {
                   });
 
                   const barras = [
-                    { label: "Total tickets", val: total, base: 0, color: GRAY_900 },
+                    { label: "Total tickets", val: total, base: 0, color: RED, textColor: "white" },
                     ...restas,
-                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN },
+                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, textColor: "white" },
                   ];
 
                   return (
@@ -1151,12 +1162,14 @@ export default function App() {
                       {barras.map(b => (
                         <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
                           <div style={{ position: "relative", width: "100%", height: ALTO_PX }}>
-                            <div title={`${b.label}: ${b.val}`} style={{
+                            <div title={`${b.label}: ${pct(b.val)}% — ${b.val} tickets`} style={{
                               position: "absolute", left: "10%", right: "10%", bottom: b.base * escala,
                               height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
                               background: b.color, borderRadius: 4,
                             }}>
-                              <div style={{ position: "absolute", top: -18, left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900 }}>{b.val}</div>
+                              <div style={{ position: "absolute", top: -30, left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3 }}>
+                                {pct(b.val)}%<br />{b.val} tickets
+                              </div>
                             </div>
                           </div>
                           <div style={{ fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 6, lineHeight: 1.3 }}>{b.label}</div>
@@ -1176,24 +1189,54 @@ export default function App() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
                   <tr style={{ background: GRAY_50 }}>
-                    {["Proveedor","Total","Realizados","No realiz.","Pend. subir","Pend. validar","Listos migrar","% Avance"].map(h => (
-                      <th key={h} style={{ padding: "8px 10px", textAlign: h === "Proveedor" ? "left" : "right", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}` }}>{h}</th>
+                    {[
+                      { h: "Proveedor", k: "proveedor" },
+                      { h: "Total", k: "total" },
+                      { h: "Realizados", k: "realizados" },
+                      { h: "No realiz.", k: "no_realizados" },
+                      { h: "Pend. subir", k: "pendiente_subir" },
+                      { h: "Pend. validar", k: "pendiente_validar" },
+                      { h: "Listos migrar", k: "listos_migrar" },
+                      { h: "% Avance", k: "pct_avance" },
+                    ].map(({ h, k }, i, arr) => (
+                      <th key={h} onClick={() => {
+                        if (rankingSortCol === k) setRankingSortDir(d => d === "desc" ? "asc" : "desc");
+                        else { setRankingSortCol(k); setRankingSortDir("desc"); }
+                      }} style={{ padding: "8px 10px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}`, borderRight: i < arr.length - 1 ? `0.5px solid ${BORDER}` : "none", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                        {h} {rankingSortCol === k && (rankingSortDir === "desc" ? "▼" : "▲")}
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {ranking.map(r => (
-                    <tr key={r.proveedor}>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{r.proveedor}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.total}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.realizados}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.no_realizados}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.pendiente_subir}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}`, color: r.pendiente_validar > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validar}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}`, fontWeight: 500 }}>{r.pct_avance ?? 0}%</td>
-                    </tr>
-                  ))}
+                  {[...ranking].sort((a, b) => {
+                    if (!rankingSortCol) return 0;
+                    const av = a[rankingSortCol], bv = b[rankingSortCol];
+                    if (rankingSortCol === "proveedor") {
+                      const as = av || "FALTA ASIGNAR", bs = bv || "FALTA ASIGNAR";
+                      return rankingSortDir === "desc" ? bs.localeCompare(as) : as.localeCompare(bs);
+                    }
+                    const an = Number(av) || 0, bn = Number(bv) || 0;
+                    return rankingSortDir === "desc" ? bn - an : an - bn;
+                  }).map(r => {
+                    const avance = r.pct_avance ?? 0;
+                    const colorAvance = avance >= 70 ? GREEN : avance >= 40 ? AMBER : RED_DARK;
+                    const bgAvance = avance >= 70 ? GREEN_LIGHT : avance >= 40 ? AMBER_LIGHT : RED_LIGHT;
+                    return (
+                      <tr key={r.proveedor || "sin-proveedor"}>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.proveedor ? GRAY_900 : GRAY_500, fontStyle: r.proveedor ? "normal" : "italic" }}>{r.proveedor || "FALTA ASIGNAR"}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.total}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.realizados}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.no_realizados}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.pendiente_subir}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.pendiente_validar > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validar}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}` }}>
+                          <span style={{ display: "inline-flex", padding: "2px 10px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bgAvance, color: colorAvance }}>{avance}%</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {ranking.length === 0 && (
                     <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin datos para el rango seleccionado</td></tr>
                   )}
@@ -1253,6 +1296,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+        </div>
+      </div>
 
       {/* MODAL EDICIÓN PLACA / RUTAS */}
       {/* MODAL CAMBIAR CONTRASEÑA */}
