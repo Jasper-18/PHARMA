@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { partial_ratio } from 'fuzzball';
 
 const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const UMBRAL_COINCIDENCIA = 95;
@@ -14,36 +13,55 @@ function parsearRutas(rutasStr) {
 
 function mejorVentana(itemNorm, textoNorm) {
   const L = itemNorm.length;
+  if (L === 0) return { ventana: null, score: 0 };
+
   let mejorD = Infinity, mejor = null;
+  
   for (let i = 0; i <= textoNorm.length - L; i++) {
     const ventana = textoNorm.slice(i, i + L);
     let d = 0;
-    for (let j = 0; j < L; j++) if (itemNorm[j] !== ventana[j]) d++;
-    if (d < mejorD) { mejorD = d; mejor = ventana; }
+    
+    // Distancia de Hamming
+    for (let j = 0; j < L; j++) {
+      if (itemNorm[j] !== ventana[j]) d++;
+    }
+    
+    if (d < mejorD) { 
+      mejorD = d; 
+      mejor = ventana; 
+    }
   }
-  return mejor;
+  
+  // Calculamos el porcentaje real de acierto matemático
+  const score = Math.round(((L - mejorD) / L) * 100);
+  
+  return { ventana: mejor, score };
 }
 
 function compararConRutas(rutasStr, textoOcr) {
   const items = parsearRutas(rutasStr);
   const textoNorm = normalizar(textoOcr);
+  
   let mejorItem = null, mejorScore = -1, ocrLeyo = null;
 
   for (const item of items) {
     const itemNorm = normalizar(item);
-    if (!itemNorm) continue;
-    const score = partial_ratio(itemNorm, textoNorm);
-    if (score > mejorScore) {
-      mejorScore = score;
+    if (!itemNorm || textoNorm.length < itemNorm.length) continue;
+
+    // Obtenemos la ventana y su score real
+    const resultado = mejorVentana(itemNorm, textoNorm);
+
+    if (resultado.score > mejorScore) {
+      mejorScore = resultado.score;
       mejorItem = item;
-      ocrLeyo = mejorVentana(itemNorm, textoNorm);
+      ocrLeyo = resultado.ventana;
     }
   }
 
   return {
     mejorItem,
     ocrLeyo,
-    mejorScore: mejorScore >= 0 ? Math.round(mejorScore) : 0,
+    mejorScore: mejorScore >= 0 ? mejorScore : 0,
     coincide: mejorScore >= UMBRAL_COINCIDENCIA,
   };
 }
