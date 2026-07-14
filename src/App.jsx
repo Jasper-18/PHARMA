@@ -1208,7 +1208,7 @@ export default function App() {
                               <div style={{ position: "absolute", bottom: b.base * escala, left: "15%", right: "15%", height: h, background: b.color, borderRadius: 2 }}>
                                 {/* Línea punteada de conexión hacia la derecha */}
                                 {tieneSiguiente && (
-                                  <div style={{ git add src/App.jsx
+                                  <div style={{ 
                                     position: "absolute", 
                                     top: i === 0 ? 0 : "100%", // La línea sale de arriba en el primer bloque, y desde la base en los de resta
                                     left: "100%", 
