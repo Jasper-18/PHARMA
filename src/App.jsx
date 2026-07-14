@@ -1129,9 +1129,10 @@ export default function App() {
 
                   let acumulado = total;
                   const restas = [
+                    { label: "No validados", val: kpis.cascada_no_validados || 0, color: GRAY_200 },
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: GRAY_500 },
                     { label: "Pendiente subir", val: kpis.cascada_pendiente_subir || 0, color: AMBER },
-                    { label: "Pendiente validar", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK },
+                    { label: "Pendiente validar / Error IA", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado };
