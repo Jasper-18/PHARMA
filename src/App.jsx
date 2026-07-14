@@ -6,8 +6,11 @@ const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZnVjY2lyYXVoZWtscHhhZ2dhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc0MzIsImV4cCI6MjA5ODEwMzQzMn0.MH8hJSktS_G3_omz9y48Vsp6PIlPcWdg6s6zdQtUNBo";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
+// Paleta FAPE estricta
 const RED = "#e00000";       
 const RED_DARK = "#c20000";  
+const RED_MID = "#ff4040"; 
+const RED_SOFT = "#ff7676";
 const RED_LIGHT = "#ffcaca"; 
 const GREEN = "#0f6e56";
 const GREEN_LIGHT = "#e1f5ee";
@@ -23,8 +26,7 @@ const GRAY_900 = "#1a1a18";
 const BORDER = "#e5e2db";
 const MAX_MB = 10;
 
-// Orden de columnas según diseño acordado (posición 6 = Proveedor, solo visible para admin)
-// headerGroup: 'ia' = encabezado con fondo azul tenue, 'transportista' = fondo amarillo tenue
+// Orden de columnas según diseño acordado
 const COLS = [
   { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
@@ -43,7 +45,7 @@ const COLS = [
   { key: "importe",             label: "Importe",                  width: 90,  right: true },
   { key: "centro_costo",        label: "CECO",                     width: 110, muted: true },
   { key: "detalle_servicio",    label: "Detalle del Servicio",     width: 180, trunc: true },
-  { key: "realizado",    label: "Realizado",                width: 80 },
+  { key: "realizado",           label: "Realizado",                width: 80 },
   { key: "estado_procesamiento_ia", label: "Procesam. IA",         width: 100, headerGroup: "ia", adminOnly: true },
   { key: "estado_validacion_ia",label: "Validación IA",            width: 110, headerGroup: "ia" },
   { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia" },
@@ -53,33 +55,24 @@ const COLS = [
   { key: "fecha_entrega_doc",   label: "Fec. Entrega Doc.",        width: 130 },
 ];
 
-// Vista de transportista: panel principal resumido (orden exacto solicitado)
 const COLS_TRANSPORTISTA_PRINCIPAL = [
   "nro_spot", "fecha_carga", "estado_final", "cd_origen", "cd_destino",
   "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
 ];
 
-// Vista de transportista: campos adicionales que se muestran solo en el modal de detalle
-// (excluye lo que ya está en el panel principal, y explícitamente match_ia/usuario_modif/fecha_modif/hora_cita/area)
 const COLS_TRANSPORTISTA_DETALLE = [
   "importe", "tipo_traslado", "cantidad", "requerimiento",
   "detalle_servicio", "realizado", "estado_doc", "fecha_entrega_doc",
 ];
 
-// Extrae el segmento "Nro..." de un nro_spot para nombrar archivos
-// "Serv Adcional Nro000004006268" → "Nro000004006268"
 function extraerNroSpotCorto(nroSpot) {
   if (!nroSpot) return "doc";
   const m = String(nroSpot).match(/(Nro\d+)/i);
   return m ? m[1] : nroSpot.replace(/\s+/g, "_").slice(0, 30);
 }
 
-// Calcula el rango de fechas por defecto anclado en la fecha_carga MÁS RECIENTE
-// que exista en la data (no en "hoy"), porque los servicios suelen programarse
-// para el día siguiente -- si se ancla en "hoy", un registro con fecha de mañana
-// queda fuera del rango justo el día que se crea.
 async function calcularRangoAncla_(isAdminUser, empresaId) {
-  let ancla = new Date(); // fallback si no hay data o falla la consulta
+  let ancla = new Date(); 
   try {
     let q = supabase
       .from("viajes")
@@ -91,10 +84,9 @@ async function calcularRangoAncla_(isAdminUser, empresaId) {
     if (!isAdminUser && empresaId) q = q.eq("proveedor", empresaId);
     const { data } = await q;
     if (data && data[0] && data[0].fecha_carga) {
-      // Parseo local (sin "Z"), para no correr el día por interpretación UTC
       ancla = new Date(data[0].fecha_carga + "T00:00:00");
     }
-  } catch { /* si falla, se queda con "hoy" como ancla */ }
+  } catch { }
 
   const desde = new Date(ancla);
   desde.setDate(ancla.getDate() - (isAdminUser ? 6 : 30));
@@ -103,9 +95,7 @@ async function calcularRangoAncla_(isAdminUser, empresaId) {
 }
 
 async function comprimirImagen(file) {
-  if (file.size > MAX_MB * 1024 * 1024) {
-    throw new Error(`El archivo supera los ${MAX_MB} MB.`);
-  }
+  if (file.size > MAX_MB * 1024 * 1024) throw new Error(`El archivo supera los ${MAX_MB} MB.`);
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -179,6 +169,13 @@ function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
   const esHoy   = d => d && fmt(d) === fmt(hoy);
   const rangoValido = selStart && selEnd && ((selEnd - selStart) / 86400000) <= 7;
 
+  // Formato estricto DD/MM/AAAA
+  const fmtLocal = (isoStr) => {
+    if (!isoStr) return "";
+    const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : isoStr;
+  };
+
   return (
     <div style={{ userSelect: "none" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -212,7 +209,7 @@ function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
         })}
       </div>
       <div style={{ marginTop: 10, padding: "6px 10px", background: GRAY_100, borderRadius: 7, fontSize: 11, color: GRAY_500, textAlign: "center" }}>
-        {rangoValido ? `${fmt(selStart)} – ${fmt(selEnd)}` : "Selecciona el rango de fechas"}
+        {rangoValido ? `${fmtLocal(fmt(selStart))} – ${fmtLocal(fmt(selEnd))}` : "Selecciona el rango de fechas"}
       </div>
     </div>
   );
@@ -226,6 +223,11 @@ export default function App() {
   const [loginErr,     setLoginErr]     = useState("");
   const [viajes,       setViajes]       = useState([]);
   const [dataLoading,  setDataLoading]  = useState(false);
+
+  // Generamos la fecha de ayer (D-1) como default para el dashboard
+  const d1 = new Date();
+  d1.setDate(d1.getDate() - 1);
+  const D1_STR = `${d1.getFullYear()}-${String(d1.getMonth() + 1).padStart(2, "0")}-${String(d1.getDate()).padStart(2, "0")}`;
 
   const _saved = (() => { try { return JSON.parse(sessionStorage.getItem("ps_filters") || "{}"); } catch { return {}; } })();
   const [fDesde,    setFDesde]    = useState(_saved.fDesde    ?? "");
@@ -254,9 +256,12 @@ export default function App() {
   const [vista, setVista] = useState("tabla");
   const [detalleModal, setDetalleModal] = useState(null);
   const [dashProveedor, setDashProveedor] = useState("");
-  const [dashDesde, setDashDesde] = useState("");
-  const [dashHasta, setDashHasta] = useState("");
+  
+  // Asignamos D-1 por defecto al dashboard
+  const [dashDesde, setDashDesde] = useState(D1_STR);
+  const [dashHasta, setDashHasta] = useState(D1_STR);
   const [dashFiltroAbierto, setDashFiltroAbierto] = useState(false);
+
   const [kpis, setKpis] = useState(null);
   const [ranking, setRanking] = useState([]);
   const [detalle, setDetalle] = useState([]);
@@ -267,6 +272,7 @@ export default function App() {
   const [rankingSortCol, setRankingSortCol] = useState(null);
   const [rankingSortDir, setRankingSortDir] = useState("desc");
   const DETALLE_POR_PAGINA = 10;
+  
   const [pwModalOpen,  setPwModalOpen]  = useState(false);
   const [pwNueva,      setPwNueva]      = useState("");
   const [pwConfirma,   setPwConfirma]   = useState("");
@@ -284,7 +290,6 @@ export default function App() {
   const [validandoIA,  setValidandoIA]  = useState(false);
   const [resultadoIA,  setResultadoIA]  = useState(null);
 
-  // Estado modal validación admin
   const [validModal,   setValidModal]   = useState(null);
   const [validSaving,  setValidSaving]  = useState(false);
   const [validErr,     setValidErr]     = useState("");
@@ -299,14 +304,11 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Al recibir la sesión, si no hay fechas guardadas en sessionStorage PARA ESTE MISMO ROL,
-  // aplica el rango por defecto según el rol: 7 días para admin, 31 para transportista —
-  // anclado en la fecha_carga más reciente de la data, no en "hoy" (ver calcularRangoAncla_)
   useEffect(() => {
     if (!session) return;
     const isAdminUser = session.user.user_metadata?.role === "admin";
     const rolActual = isAdminUser ? "admin" : "transportista";
-    if (_saved.fDesde && _saved.fHasta && _saved._rol === rolActual) return; // mismo rol, no pisar
+    if (_saved.fDesde && _saved.fHasta && _saved._rol === rolActual) return;
     (async () => {
       const { desde, hasta } = await calcularRangoAncla_(isAdminUser, session.user.user_metadata?.empresa_id);
       setFDesde(desde);
@@ -327,7 +329,7 @@ export default function App() {
     const isAdmin = meta?.role === "admin";
     const filters = fetchViajesRef.current || {};
     let q = supabase.from("viajes").select("*").order("fecha_carga", { ascending: false });
-    q = q.eq("realizado", "SI"); // solo servicios efectivamente realizados, para ambos roles
+    q = q.eq("realizado", "SI");
     if (!isAdmin && meta?.empresa_id) q = q.eq("proveedor", meta.empresa_id);
     if (isAdmin && filters.fProveedor) q = q.eq("proveedor", filters.fProveedor);
     if (filters.fDesde)    q = q.gte("fecha_carga", filters.fDesde);
@@ -430,8 +432,6 @@ export default function App() {
     setFNroSpot(dNroSpot); setFRutas(dRutas); setFPlaca(dPlaca);
     setFEstadoDoc(dEstadoDoc); setFEstFinal(dEstFinal); setFProveedor(dProveedor);
     setFDesde(dDesde); setFHasta(dHasta);
-    // Actualizar el ref directamente para que fetchViajes use los valores nuevos
-    // (los useEffect de React aún no habrán corrido cuando se llama fetchViajes)
     fetchViajesRef.current = {
       fDesde: dDesde, fHasta: dHasta, fEstadoDoc: dEstadoDoc,
       fNroSpot: dNroSpot, fRutas: dRutas, fPlaca: dPlaca,
@@ -462,11 +462,7 @@ export default function App() {
     setFilterOpen(true);
   }
 
-  // Para columnas tipo DATE puro (solo calendario, ej. fecha_carga = "2026-07-12").
-  // Se parsea directo de los dígitos, SIN pasar por new Date(): new Date() interpreta
-  // ese texto como medianoche UTC, y en Perú (UTC-5) eso corre el día hacia atrás al
-  // convertir a hora local (12 → 11). No hay ninguna zona horaria que aplicar aquí,
-  // porque una fecha tipo DATE no es un instante, es un día del calendario.
+  // Estricto DD/MM/AAAA para presentación
   const fmtFechaSolo = (val) => {
     if (!val) return "";
     const m = String(val).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -474,9 +470,6 @@ export default function App() {
     return String(val);
   };
 
-  // Para TIMESTAMPTZ reales (fecha_modif, fecha_entrega_doc, subido_en) — estos sí
-  // son un instante con hora y zona horaria, así que SÍ corresponde convertir a
-  // hora local del navegador.
   const fmtFecha = (val) => {
     if (!val) return "";
     const d = new Date(val);
@@ -497,13 +490,12 @@ export default function App() {
     let h = d.getHours();
     const min  = String(d.getMinutes()).padStart(2, "0");
     const ampm = h >= 12 ? "pm." : "am.";
-    h = h % 12 || 12; // sin cero inicial: 4 en vez de 04
+    h = h % 12 || 12; 
     return `${dd}/${mm}/${aaaa} ${h}:${min} ${ampm}`;
   };
 
   function exportarExcel() {
     if (!viajes.length) return;
-    // Exporta siempre el set completo de columnas (según rol), no el panel resumido en pantalla
     const colsExp = COLS.filter(c => !c.adminOnly || isAdmin);
     const headers = colsExp.map(c => c.label);
     const rows = viajes.map(v => colsExp.map(c => {
@@ -522,7 +514,6 @@ export default function App() {
     const wsData = [headers, ...rows];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-    // Auto-ancho de columnas basado en el contenido más largo
     const colWidths = headers.map((h, i) => {
       const maxLen = Math.max(
         h.length,
@@ -538,7 +529,6 @@ export default function App() {
   }
 
   async function abrirFoto(pathOrUrl) {
-    // Si viene una URL completa (datos viejos), extraer el path relativo
     let path = pathOrUrl;
     if (pathOrUrl && pathOrUrl.startsWith("http")) {
       const match = pathOrUrl.match(/\/object\/(?:public|sign)\/documentos\/(.+?)(?:\?|$)/);
@@ -565,7 +555,6 @@ export default function App() {
       alert("No se pudo obtener la URL de la foto.");
       return;
     }
-    // Forzar descarga via blob para evitar que el navegador abra la imagen en pestaña
     try {
       const resp = await fetch(data.signedUrl);
       const blob = await resp.blob();
@@ -576,13 +565,11 @@ export default function App() {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch {
-      // Fallback: abrir en pestaña si fetch falla por CORS
       window.open(data.signedUrl, "_blank");
     }
   }
 
   function openModal(viaje) {
-    // Verificar que el transportista haya completado placa y rutas antes de subir
     const faltaPlaca = !viaje.placa || viaje.placa.trim() === "";
     const faltaRutas = !viaje.rutas || viaje.rutas.trim() === "";
     if (faltaPlaca || faltaRutas) {
@@ -613,23 +600,21 @@ export default function App() {
       const path = `${modal.proveedor}/${modal.nro_spot}/${fileName}`;
       const { error: upErr } = await supabase.storage.from("documentos").upload(path, compressed, { upsert: true });
       if (upErr) throw upErr;
-      // Bucket privado — guardar el path, la URL firmada se genera al momento de ver/descargar
+      
       const nuevasVersiones = [...versiones, { v: nv, path, nombre: fileName, subido_por: session.user.email, subido_en: new Date().toISOString() }];
       const ahora = new Date().toISOString();
       const { error: dbErr } = await supabase.from("viajes").update({
         foto_versiones:    nuevasVersiones,
-        foto_url:          path,           // guardamos el path, no URL pública
+        foto_url:          path,           
         foto_nombre:       fileName,
         subido_por:        session.user.email,
         subido_en:         ahora,
         fecha_entrega_doc: versiones.length === 0 ? ahora : modal.fecha_entrega_doc,
         estado_doc:        "Completo",
-        estado_procesamiento_ia: null, // resetea para forzar re-validación de esta nueva foto
+        estado_procesamiento_ia: null, 
       }).eq("nro_spot", modal.nro_spot);
       if (dbErr) throw dbErr;
 
-      // La foto ya está guardada de forma segura en este punto — lo que sigue
-      // (validación IA en vivo) es una mejora de UX, no puede hacer fallar la subida.
       setUploading(false);
       setValidandoIA(true);
 
@@ -641,10 +626,10 @@ export default function App() {
           body: JSON.stringify({ nro_spot: modal.nro_spot }),
         });
         if (resp.ok) resultado = await resp.json();
-      } catch { /* sin internet momentáneo, timeout, etc. — el batch la recoge después */ }
+      } catch { }
 
       setValidandoIA(false);
-      setResultadoIA(resultado); // null si falló — se muestra mensaje genérico
+      setResultadoIA(resultado); 
       setViajes(prev => prev.map(v => v.nro_spot === modal.nro_spot
         ? { ...v, foto_versiones: nuevasVersiones, foto_url: path, foto_nombre: fileName,
             subido_por: session.user.email, subido_en: ahora, estado_doc: "Completo",
@@ -661,7 +646,6 @@ export default function App() {
     }
   }
 
-  // Validación manual por admin
   async function handleValidarManual() {
     if (!validModal) return;
     setValidSaving(true); setValidErr("");
@@ -708,13 +692,14 @@ export default function App() {
       setKpis(kpisData?.[0] || null);
       setRanking(rankingData || []);
 
+      // Actualizado a fecha_carga para unificar visualización
       let q = supabase.from("viajes")
         .select("nro_spot, proveedor, fecha_carga, realizado, rutas, estado_validacion_ia, estado_final", { count: "exact" })
-        .order("fecha_registro", { ascending: false })
+        .order("fecha_carga", { ascending: false }) 
         .range(pagina * DETALLE_POR_PAGINA, pagina * DETALLE_POR_PAGINA + DETALLE_POR_PAGINA - 1);
       if (dashProveedor) q = q.eq("proveedor", dashProveedor);
-      if (dashDesde) q = q.gte("fecha_registro", dashDesde);
-      if (dashHasta) q = q.lte("fecha_registro", dashHasta);
+      if (dashDesde) q = q.gte("fecha_carga", dashDesde);
+      if (dashHasta) q = q.lte("fecha_carga", dashHasta);
       const { data: detalleData, count, error: detalleErr } = await q;
       if (detalleErr) throw detalleErr;
       setDetalle(detalleData || []);
@@ -735,7 +720,9 @@ export default function App() {
   }, [vista, isAdmin, dashProveedor, dashDesde, dashHasta]);
 
   function limpiarFiltrosDashboard() {
-    setDashProveedor(""); setDashDesde(""); setDashHasta("");
+    setDashProveedor(""); 
+    setDashDesde(D1_STR); 
+    setDashHasta(D1_STR);
   }
 
   const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal || fProveedor;
@@ -766,7 +753,6 @@ export default function App() {
     </div>
   );
 
-  // Columnas visibles según rol
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
     : COLS_TRANSPORTISTA_PRINCIPAL.map(key => COLS.find(c => c.key === key)).filter(Boolean);
@@ -848,7 +834,6 @@ export default function App() {
         </div>
         {vista === "tabla" && (
           <>
-            {/* Exportar Excel */}
             <button onClick={exportarExcel} title="Exportar a Excel"
               style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -998,9 +983,6 @@ export default function App() {
                       } else if (c.key === "fecha_carga") {
                         content = v[c.key] ? fmtFechaSolo(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "hora_cita") {
-                        // Google Sheets guarda columnas "solo hora" con una fecha base (epoch 1899),
-                        // así que el valor puede llegar como "Sat Dec 30 1899 09:00:00..." — se extrae
-                        // solo el HH:MM sin importar el resto del texto.
                         const m = v[c.key] ? String(v[c.key]).match(/(\d{1,2}:\d{2})/) : null;
                         content = m ? m[1] : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (content === null || content === undefined || content === "") {
@@ -1015,7 +997,6 @@ export default function App() {
                       );
                     })}
 
-                    {/* Botón Detalle — solo transportista, abre modal con campos extendidos */}
                     {!isAdmin && (
                       <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 200, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                         <button onClick={() => setDetalleModal(v)} title="Ver detalle completo"
@@ -1045,7 +1026,6 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Botones foto — visibles para todos si hay foto */}
                     <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 0 : 84, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {completo && v.foto_url && (
                         <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
@@ -1068,7 +1048,6 @@ export default function App() {
                       )}
                     </td>
 
-                    {/* Doc. adjuntos — solo transportista */}
                     {!isAdmin && (
                       <td style={{ padding: "8px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 0, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                         <button onClick={() => openModal(v)}
@@ -1102,9 +1081,9 @@ export default function App() {
               </select>
             </div>
             
-            {/* Calendario con Dropdown */}
+            {/* Calendario con Dropdown format DD/MM/AAAA */}
             <div style={{ position: "relative" }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha de ejecución</div>
               <button onClick={() => setDashFiltroAbierto(!dashFiltroAbierto)} 
                 style={{ ...inp, width: 220, textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                 {dashDesde && dashHasta ? `${fmtFechaSolo(dashDesde)} al ${fmtFechaSolo(dashHasta)}` : "Seleccionar fechas"} 
@@ -1157,15 +1136,15 @@ export default function App() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
                 {(() => {
                   const total = kpis.total_tickets || 0;
-                  const ALTO_PX = 180;
+                  const ALTO_PX = 200;
                   const escala = total > 0 ? ALTO_PX / total : 0;
                   const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
 
                   let acumulado = total;
                   const restas = [
                     { label: "No validados", val: kpis.cascada_no_validados || 0, color: RED_LIGHT, textColor: RED_DARK },
-                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#F0AAB4", textColor: RED_DARK },
-                    { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: "#DC5570", textColor: "white" },
+                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: RED_SOFT, textColor: RED_DARK },
+                    { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: RED_MID, textColor: "white" },
                     { label: "Pend. validar", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK, textColor: "white" },
                   ].map(r => {
                     const base = acumulado - r.val;
@@ -1180,21 +1159,19 @@ export default function App() {
                     { label: "Listos migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, textColor: "white" },
                   ];
 
-                  // Marcas del Eje Y
                   const marcasY = [0, Math.round(total * 0.25), Math.round(total * 0.5), Math.round(total * 0.75), total];
 
                   return (
-                    <div style={{ display: "flex", height: ALTO_PX + 60, fontFamily: "sans-serif" }}>
+                    <div style={{ display: "flex", height: ALTO_PX + 70, fontFamily: "sans-serif", paddingTop: 30 }}>
                       
                       {/* Eje Y */}
                       <div style={{ width: 35, display: "flex", flexDirection: "column-reverse", justifyContent: "space-between", alignItems: "flex-end", paddingRight: 10, borderRight: `1px solid ${BORDER}`, height: ALTO_PX, color: GRAY_500, fontSize: 10 }}>
                         {marcasY.map((m, i) => <span key={i} style={{ lineHeight: 1, position: "relative", top: i === 0 ? 5 : i === marcasY.length - 1 ? -5 : 0 }}>{m}</span>)}
                       </div>
 
-                      {/* Contenedor de barras */}
-                      <div style={{ flex: 1, display: "flex", alignItems: "flex-end", height: ALTO_PX, position: "relative", paddingLeft: 10, overflow: "hidden" }}>
+                      {/* Contenedor de barras sin overflow hidden para no cortar textos */}
+                      <div style={{ flex: 1, display: "flex", alignItems: "flex-end", height: ALTO_PX, position: "relative", paddingLeft: 10 }}>
                         
-                        {/* Líneas horizontales fondo (Guías Y) */}
                         {marcasY.map((m, i) => (
                           <div key={`y-${i}`} style={{ position: "absolute", bottom: m * escala, left: 10, right: 0, borderTop: `1px dashed ${GRAY_100}`, zIndex: 0 }} />
                         ))}
@@ -1205,26 +1182,25 @@ export default function App() {
                           return (
                             <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", zIndex: 1, height: "100%" }}>
                               
-                              <div style={{ position: "absolute", bottom: b.base * escala, left: "15%", right: "15%", height: h, background: b.color, borderRadius: 2 }}>
-                                {/* Línea punteada de conexión hacia la derecha */}
+                              <div style={{ position: "absolute", bottom: b.base * escala, left: "10%", right: "10%", height: h, background: b.color, borderRadius: 2 }}>
+                                {/* Línea punteada conectora desde el extremo superior derecho */}
                                 {tieneSiguiente && (
                                   <div style={{ 
                                     position: "absolute", 
-                                    top: i === 0 ? 0 : "100%", // La línea sale de arriba en el primer bloque, y desde la base en los de resta
+                                    top: 0,
                                     left: "100%", 
-                                    width: "50vw", // Sobredimensionado, el contenedor principal corta el excedente
-                                    borderTop: `1.5px dashed ${GRAY_500}`, 
+                                    width: "100%", // Asumiendo distribución uniforme
+                                    borderTop: `1px dashed ${GRAY_500}`, 
                                     zIndex: -1 
                                   }} />
                                 )}
                               </div>
                               
-                              {/* Valores sobre la barra */}
+                              {/* Textos elevados dinámicamente para no cortarse */}
                               <div style={{ position: "absolute", bottom: (b.base * escala) + h + 6, left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: GRAY_900 }}>
                                 {pct(b.val)}%<br />{b.val}
                               </div>
                               
-                              {/* Etiqueta Eje X */}
                               <div style={{ position: "absolute", top: ALTO_PX + 10, left: 0, right: 0, fontSize: 10, color: GRAY_500, textAlign: "center", lineHeight: 1.2, padding: "0 4px" }}>
                                 {b.label}
                               </div>
@@ -1302,7 +1278,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Detalle de tickets filtrados — colapsado por defecto para que lo esencial quepa sin scroll */}
+          {/* Detalle de tickets filtrados */}
           <div>
             <button onClick={() => setDetalleAbierto(o => !o)}
               style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: detalleAbierto ? 10 : 0, background: "none", border: "none", padding: "6px 0", cursor: "pointer" }}>
@@ -1357,8 +1333,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* MODAL EDICIÓN PLACA / RUTAS */}
-      {/* MODAL CAMBIAR CONTRASEÑA */}
       {pwModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && !pwSaving && setPwModalOpen(false)}>
@@ -1404,7 +1378,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL DETALLE — vista transportista, campos extendidos fuera del panel principal */}
       {detalleModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && setDetalleModal(null)}>
@@ -1474,12 +1447,10 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL VALIDACIÓN MANUAL ADMIN */}
       {validModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && !validSaving && setValidModal(null)}>
           <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
-            {/* Header con ícono */}
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
               <div style={{ width: 38, height: 38, borderRadius: "50%", background: BLUE_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={BLUE} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1509,7 +1480,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL SUBIDA DOC */}
       {modal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && setModal(null)}>
@@ -1520,7 +1490,6 @@ export default function App() {
             </div>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, fontFamily: "monospace" }}>{modal.nro_spot}</div>
 
-            {/* Vista bloqueada — faltan campos */}
             {modal._bloqueado ? (
               <div>
                 <div style={{ padding: "14px 16px", background: AMBER_LIGHT, borderRadius: 10, marginBottom: 18, border: `0.5px solid #e8c87a` }}>
