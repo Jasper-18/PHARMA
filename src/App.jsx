@@ -6,9 +6,9 @@ const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZnVjY2lyYXVoZWtscHhhZ2dhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc0MzIsImV4cCI6MjA5ODEwMzQzMn0.MH8hJSktS_G3_omz9y48Vsp6PIlPcWdg6s6zdQtUNBo";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
-const RED = "#C8102E";
-const RED_DARK = "#A00D24";
-const RED_LIGHT = "#FCEBEB";
+const RED = "#e00000";       
+const RED_DARK = "#c20000";  
+const RED_LIGHT = "#ffcaca"; 
 const GREEN = "#0f6e56";
 const GREEN_LIGHT = "#e1f5ee";
 const AMBER = "#854f0b";
@@ -256,6 +256,7 @@ export default function App() {
   const [dashProveedor, setDashProveedor] = useState("");
   const [dashDesde, setDashDesde] = useState("");
   const [dashHasta, setDashHasta] = useState("");
+  const [dashFiltroAbierto, setDashFiltroAbierto] = useState(false);
   const [kpis, setKpis] = useState(null);
   const [ranking, setRanking] = useState([]);
   const [detalle, setDetalle] = useState([]);
@@ -814,11 +815,21 @@ export default function App() {
           <div style={{ width: 190, background: "white", borderRight: `0.5px solid ${BORDER}`, flexShrink: 0, display: "flex", flexDirection: "column", padding: "14px 10px" }}>
             <button onClick={() => setVista("tabla")}
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "tabla" ? RED_LIGHT : "transparent", color: vista === "tabla" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "tabla" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
-              <span style={{ fontSize: 14 }}>📋</span> Seguimiento Adicionales
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="9" y1="21" x2="9" y2="9"></line>
+              </svg> 
+              Seguimiento Adicionales
             </button>
             <button onClick={() => setVista("dashboard")}
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard" ? RED_LIGHT : "transparent", color: vista === "dashboard" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard" ? 600 : 500, cursor: "pointer", textAlign: "left" }}>
-              <span style={{ fontSize: 14 }}>📊</span> Dashboard
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <line x1="18" y1="20" x2="18" y2="10"></line>
+                <line x1="12" y1="20" x2="12" y2="4"></line>
+                <line x1="6" y1="20" x2="6" y2="14"></line>
+              </svg> 
+              Dashboard
             </button>
           </div>
         )}
@@ -1090,11 +1101,23 @@ export default function App() {
                 ))}
               </select>
             </div>
-            <div>
+            
+            {/* Calendario con Dropdown */}
+            <div style={{ position: "relative" }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro</div>
-              <RangePicker desde={dashDesde} hasta={dashHasta} maxDias={90}
-                onChange={({ desde, hasta }) => { setDashDesde(desde); setDashHasta(hasta); }} />
+              <button onClick={() => setDashFiltroAbierto(!dashFiltroAbierto)} 
+                style={{ ...inp, width: 220, textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                {dashDesde && dashHasta ? `${fmtFechaSolo(dashDesde)} al ${fmtFechaSolo(dashHasta)}` : "Seleccionar fechas"} 
+                <span style={{ fontSize: 9, transform: dashFiltroAbierto ? "rotate(180deg)" : "none" }}>▼</span>
+              </button>
+              {dashFiltroAbierto && (
+                <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 6, background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 10, padding: 12, zIndex: 50, boxShadow: "0 6px 20px rgba(0,0,0,0.12)" }}>
+                  <RangePicker desde={dashDesde} hasta={dashHasta} maxDias={90}
+                    onChange={({ desde, hasta }) => { setDashDesde(desde); setDashHasta(hasta); setDashFiltroAbierto(false); }} />
+                </div>
+              )}
             </div>
+
             <button onClick={limpiarFiltrosDashboard} style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 12 }}>
               Limpiar filtros
             </button>
@@ -1129,12 +1152,12 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Cascada — tipo escalón real, tonalidades de rojo FAPE */}
+              {/* Cascada — tipo escalón real con Eje Y y Líneas de conexión */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
                 {(() => {
                   const total = kpis.total_tickets || 0;
-                  const ALTO_PX = 150;
+                  const ALTO_PX = 180;
                   const escala = total > 0 ? ALTO_PX / total : 0;
                   const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
 
@@ -1142,8 +1165,8 @@ export default function App() {
                   const restas = [
                     { label: "No validados", val: kpis.cascada_no_validados || 0, color: RED_LIGHT, textColor: RED_DARK },
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#F0AAB4", textColor: RED_DARK },
-                    { label: "Pendiente subir", val: kpis.cascada_pendiente_subir || 0, color: "#DC5570", textColor: "white" },
-                    { label: "Pendiente validar / Error IA", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK, textColor: "white" },
+                    { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: "#DC5570", textColor: "white" },
+                    { label: "Pend. validar", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK, textColor: "white" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado };
@@ -1154,27 +1177,61 @@ export default function App() {
                   const barras = [
                     { label: "Total tickets", val: total, base: 0, color: RED, textColor: "white" },
                     ...restas,
-                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, textColor: "white" },
+                    { label: "Listos migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, textColor: "white" },
                   ];
 
+                  // Marcas del Eje Y
+                  const marcasY = [0, Math.round(total * 0.25), Math.round(total * 0.5), Math.round(total * 0.75), total];
+
                   return (
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: ALTO_PX + 46 }}>
-                      {barras.map(b => (
-                        <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-                          <div style={{ position: "relative", width: "100%", height: ALTO_PX }}>
-                            <div title={`${b.label}: ${pct(b.val)}% — ${b.val} tickets`} style={{
-                              position: "absolute", left: "10%", right: "10%", bottom: b.base * escala,
-                              height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
-                              background: b.color, borderRadius: 4,
-                            }}>
-                              <div style={{ position: "absolute", top: -30, left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3 }}>
-                                {pct(b.val)}%<br />{b.val} tickets
+                    <div style={{ display: "flex", height: ALTO_PX + 60, fontFamily: "sans-serif" }}>
+                      
+                      {/* Eje Y */}
+                      <div style={{ width: 35, display: "flex", flexDirection: "column-reverse", justifyContent: "space-between", alignItems: "flex-end", paddingRight: 10, borderRight: `1px solid ${BORDER}`, height: ALTO_PX, color: GRAY_500, fontSize: 10 }}>
+                        {marcasY.map((m, i) => <span key={i} style={{ lineHeight: 1, position: "relative", top: i === 0 ? 5 : i === marcasY.length - 1 ? -5 : 0 }}>{m}</span>)}
+                      </div>
+
+                      {/* Contenedor de barras */}
+                      <div style={{ flex: 1, display: "flex", alignItems: "flex-end", height: ALTO_PX, position: "relative", paddingLeft: 10, overflow: "hidden" }}>
+                        
+                        {/* Líneas horizontales fondo (Guías Y) */}
+                        {marcasY.map((m, i) => (
+                          <div key={`y-${i}`} style={{ position: "absolute", bottom: m * escala, left: 10, right: 0, borderTop: `1px dashed ${GRAY_100}`, zIndex: 0 }} />
+                        ))}
+
+                        {barras.map((b, i) => {
+                          const tieneSiguiente = i < barras.length - 1;
+                          const h = Math.max(b.val * escala, b.val > 0 ? 3 : 0);
+                          return (
+                            <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", zIndex: 1, height: "100%" }}>
+                              
+                              <div style={{ position: "absolute", bottom: b.base * escala, left: "15%", right: "15%", height: h, background: b.color, borderRadius: 2 }}>
+                                {/* Línea punteada de conexión hacia la derecha */}
+                                {tieneSiguiente && (
+                                  <div style={{ git add src/App.jsx
+                                    position: "absolute", 
+                                    top: i === 0 ? 0 : "100%", // La línea sale de arriba en el primer bloque, y desde la base en los de resta
+                                    left: "100%", 
+                                    width: "50vw", // Sobredimensionado, el contenedor principal corta el excedente
+                                    borderTop: `1.5px dashed ${GRAY_500}`, 
+                                    zIndex: -1 
+                                  }} />
+                                )}
+                              </div>
+                              
+                              {/* Valores sobre la barra */}
+                              <div style={{ position: "absolute", bottom: (b.base * escala) + h + 6, left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: GRAY_900 }}>
+                                {pct(b.val)}%<br />{b.val}
+                              </div>
+                              
+                              {/* Etiqueta Eje X */}
+                              <div style={{ position: "absolute", top: ALTO_PX + 10, left: 0, right: 0, fontSize: 10, color: GRAY_500, textAlign: "center", lineHeight: 1.2, padding: "0 4px" }}>
+                                {b.label}
                               </div>
                             </div>
-                          </div>
-                          <div style={{ fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 6, lineHeight: 1.3 }}>{b.label}</div>
-                        </div>
-                      ))}
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })()}
