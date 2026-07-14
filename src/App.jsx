@@ -262,6 +262,7 @@ export default function App() {
   const [detalleTotal, setDetalleTotal] = useState(0);
   const [detallePagina, setDetallePagina] = useState(0);
   const [dashLoading, setDashLoading] = useState(false);
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
   const DETALLE_POR_PAGINA = 10;
   const [pwModalOpen,  setPwModalOpen]  = useState(false);
   const [pwNueva,      setPwNueva]      = useState("");
@@ -1118,33 +1119,49 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Cascada — barra horizontal segmentada */}
-              <div style={{ marginBottom: 28 }}>
+              {/* Cascada — tipo escalón real, cada barra a su altura correspondiente */}
+              <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
                 {(() => {
-                  const total = kpis.total_tickets || 1;
-                  const segs = [
-                    { label: "No realizados", val: kpis.cascada_no_realizados, color: GRAY_500 },
-                    { label: "Pendiente subir", val: kpis.cascada_pendiente_subir, color: AMBER },
-                    { label: "Pendiente validar", val: kpis.cascada_pendiente_validar, color: RED_DARK },
-                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar, color: GREEN },
+                  const total = kpis.total_tickets || 0;
+                  const ALTO_PX = 150;
+                  const escala = total > 0 ? ALTO_PX / total : 0;
+
+                  let acumulado = total;
+                  const restas = [
+                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: GRAY_500 },
+                    { label: "Pendiente subir", val: kpis.cascada_pendiente_subir || 0, color: AMBER },
+                    { label: "Pendiente validar", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK },
+                  ].map(r => {
+                    const base = acumulado - r.val;
+                    const barra = { ...r, base, tope: acumulado };
+                    acumulado = base;
+                    return barra;
+                  });
+
+                  const barras = [
+                    { label: "Total tickets", val: total, base: 0, color: GRAY_900 },
+                    ...restas,
+                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN },
                   ];
+
                   return (
-                    <>
-                      <div style={{ display: "flex", width: "100%", height: 28, borderRadius: 6, overflow: "hidden" }}>
-                        {segs.map(s => (
-                          <div key={s.label} title={`${s.label}: ${s.val}`} style={{ width: `${(s.val / total) * 100}%`, background: s.color, minWidth: s.val > 0 ? 3 : 0 }} />
-                        ))}
-                      </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10, fontSize: 11, color: GRAY_500 }}>
-                        {segs.map(s => (
-                          <span key={s.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
-                            {s.label}: {s.val}
-                          </span>
-                        ))}
-                      </div>
-                    </>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: ALTO_PX + 46 }}>
+                      {barras.map(b => (
+                        <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <div style={{ position: "relative", width: "100%", height: ALTO_PX }}>
+                            <div title={`${b.label}: ${b.val}`} style={{
+                              position: "absolute", left: "10%", right: "10%", bottom: b.base * escala,
+                              height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
+                              background: b.color, borderRadius: 4,
+                            }}>
+                              <div style={{ position: "absolute", top: -18, left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900 }}>{b.val}</div>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 6, lineHeight: 1.3 }}>{b.label}</div>
+                        </div>
+                      ))}
+                    </div>
                   );
                 })()}
               </div>
@@ -1184,12 +1201,18 @@ export default function App() {
             </div>
           </div>
 
-          {/* Detalle de tickets filtrados */}
+          {/* Detalle de tickets filtrados — colapsado por defecto para que lo esencial quepa sin scroll */}
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900 }}>Detalle de tickets filtrados</div>
-              <div style={{ fontSize: 11, color: GRAY_500 }}>Mostrando {detalle.length ? detallePagina * DETALLE_POR_PAGINA + 1 : 0}-{detallePagina * DETALLE_POR_PAGINA + detalle.length} de {detalleTotal}</div>
-            </div>
+            <button onClick={() => setDetalleAbierto(o => !o)}
+              style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: detalleAbierto ? 10 : 0, background: "none", border: "none", padding: "6px 0", cursor: "pointer" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ display: "inline-block", transform: detalleAbierto ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s", fontSize: 11, color: GRAY_500 }}>▶</span>
+                Detalle de tickets filtrados
+              </span>
+              <span style={{ fontSize: 11, color: GRAY_500 }}>{detalleAbierto ? `Mostrando ${detalle.length ? detallePagina * DETALLE_POR_PAGINA + 1 : 0}-${detallePagina * DETALLE_POR_PAGINA + detalle.length} de ${detalleTotal}` : `Ver ${detalleTotal} tickets ›`}</span>
+            </button>
+            {detalleAbierto && (
+              <>
             <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
@@ -1224,6 +1247,8 @@ export default function App() {
               <button onClick={() => fetchDashboard(detallePagina + 1)} disabled={(detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal}
                 style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${BORDER}`, background: "white", fontSize: 12, cursor: (detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal ? "default" : "pointer", color: (detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal ? GRAY_200 : GRAY_900 }}>Siguiente</button>
             </div>
+              </>
+            )}
           </div>
         </div>
       )}
