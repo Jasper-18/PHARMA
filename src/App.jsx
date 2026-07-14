@@ -383,56 +383,6 @@ export default function App() {
     setPwModalOpen(true);
   }
 
-  const fetchDashboard = useCallback(async (pagina = 0) => {
-    if (!isAdmin) return;
-    setDashLoading(true);
-    try {
-      const [{ data: kpisData, error: kpisErr }, { data: rankingData, error: rankingErr }] = await Promise.all([
-        supabase.rpc("dashboard_kpis", {
-          p_proveedor: dashProveedor || null,
-          p_fecha_desde: dashDesde || null,
-          p_fecha_hasta: dashHasta || null,
-        }),
-        supabase.rpc("dashboard_ranking", {
-          p_fecha_desde: dashDesde || null,
-          p_fecha_hasta: dashHasta || null,
-        }),
-      ]);
-      if (kpisErr) throw kpisErr;
-      if (rankingErr) throw rankingErr;
-      setKpis(kpisData?.[0] || null);
-      setRanking(rankingData || []);
-
-      let q = supabase.from("viajes")
-        .select("nro_spot, proveedor, fecha_carga, realizado, rutas, estado_validacion_ia, estado_final", { count: "exact" })
-        .order("fecha_registro", { ascending: false })
-        .range(pagina * DETALLE_POR_PAGINA, pagina * DETALLE_POR_PAGINA + DETALLE_POR_PAGINA - 1);
-      if (dashProveedor) q = q.eq("proveedor", dashProveedor);
-      if (dashDesde) q = q.gte("fecha_registro", dashDesde);
-      if (dashHasta) q = q.lte("fecha_registro", dashHasta);
-      const { data: detalleData, count, error: detalleErr } = await q;
-      if (detalleErr) throw detalleErr;
-      setDetalle(detalleData || []);
-      setDetalleTotal(count || 0);
-      setDetallePagina(pagina);
-    } catch (err) {
-      console.error("Error cargando dashboard:", err);
-    } finally {
-      setDashLoading(false);
-    }
-  }, [isAdmin, dashProveedor, dashDesde, dashHasta]);
-
-  useEffect(() => {
-    if (vista !== "dashboard" || !isAdmin) return;
-    fetchDashboard(0);
-    const intervalo = setInterval(() => fetchDashboard(detallePagina), 30000);
-    return () => clearInterval(intervalo);
-  }, [vista, isAdmin, dashProveedor, dashDesde, dashHasta]);
-
-  function limpiarFiltrosDashboard() {
-    setDashProveedor(""); setDashDesde(""); setDashHasta("");
-  }
-
   function openEditModal(viaje) {
     setEditModal(viaje);
     setEditPlaca(viaje.placa || "");
@@ -733,6 +683,56 @@ export default function App() {
   const empresa = meta?.empresa_id || "";
   const initials= (session?.user?.email || "U").substring(0, 2).toUpperCase();
   const inp     = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
+
+  const fetchDashboard = useCallback(async (pagina = 0) => {
+    if (!isAdmin) return;
+    setDashLoading(true);
+    try {
+      const [{ data: kpisData, error: kpisErr }, { data: rankingData, error: rankingErr }] = await Promise.all([
+        supabase.rpc("dashboard_kpis", {
+          p_proveedor: dashProveedor || null,
+          p_fecha_desde: dashDesde || null,
+          p_fecha_hasta: dashHasta || null,
+        }),
+        supabase.rpc("dashboard_ranking", {
+          p_fecha_desde: dashDesde || null,
+          p_fecha_hasta: dashHasta || null,
+        }),
+      ]);
+      if (kpisErr) throw kpisErr;
+      if (rankingErr) throw rankingErr;
+      setKpis(kpisData?.[0] || null);
+      setRanking(rankingData || []);
+
+      let q = supabase.from("viajes")
+        .select("nro_spot, proveedor, fecha_carga, realizado, rutas, estado_validacion_ia, estado_final", { count: "exact" })
+        .order("fecha_registro", { ascending: false })
+        .range(pagina * DETALLE_POR_PAGINA, pagina * DETALLE_POR_PAGINA + DETALLE_POR_PAGINA - 1);
+      if (dashProveedor) q = q.eq("proveedor", dashProveedor);
+      if (dashDesde) q = q.gte("fecha_registro", dashDesde);
+      if (dashHasta) q = q.lte("fecha_registro", dashHasta);
+      const { data: detalleData, count, error: detalleErr } = await q;
+      if (detalleErr) throw detalleErr;
+      setDetalle(detalleData || []);
+      setDetalleTotal(count || 0);
+      setDetallePagina(pagina);
+    } catch (err) {
+      console.error("Error cargando dashboard:", err);
+    } finally {
+      setDashLoading(false);
+    }
+  }, [isAdmin, dashProveedor, dashDesde, dashHasta]);
+
+  useEffect(() => {
+    if (vista !== "dashboard" || !isAdmin) return;
+    fetchDashboard(0);
+    const intervalo = setInterval(() => fetchDashboard(detallePagina), 30000);
+    return () => clearInterval(intervalo);
+  }, [vista, isAdmin, dashProveedor, dashDesde, dashHasta]);
+
+  function limpiarFiltrosDashboard() {
+    setDashProveedor(""); setDashDesde(""); setDashHasta("");
+  }
 
   const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal || fProveedor;
 
