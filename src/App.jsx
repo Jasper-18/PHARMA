@@ -251,7 +251,18 @@ export default function App() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [modal,        setModal]        = useState(null);
   const [editModal,    setEditModal]    = useState(null);
+  const [vista, setVista] = useState("tabla");
   const [detalleModal, setDetalleModal] = useState(null);
+  const [dashProveedor, setDashProveedor] = useState("");
+  const [dashDesde, setDashDesde] = useState("");
+  const [dashHasta, setDashHasta] = useState("");
+  const [kpis, setKpis] = useState(null);
+  const [ranking, setRanking] = useState([]);
+  const [detalle, setDetalle] = useState([]);
+  const [detalleTotal, setDetalleTotal] = useState(0);
+  const [detallePagina, setDetallePagina] = useState(0);
+  const [dashLoading, setDashLoading] = useState(false);
+  const DETALLE_POR_PAGINA = 10;
   const [pwModalOpen,  setPwModalOpen]  = useState(false);
   const [pwNueva,      setPwNueva]      = useState("");
   const [pwConfirma,   setPwConfirma]   = useState("");
@@ -370,6 +381,56 @@ export default function App() {
     setUserMenuOpen(false);
     setPwNueva(""); setPwConfirma(""); setPwErr(""); setPwOk(false);
     setPwModalOpen(true);
+  }
+
+  const fetchDashboard = useCallback(async (pagina = 0) => {
+    if (!isAdmin) return;
+    setDashLoading(true);
+    try {
+      const [{ data: kpisData, error: kpisErr }, { data: rankingData, error: rankingErr }] = await Promise.all([
+        supabase.rpc("dashboard_kpis", {
+          p_proveedor: dashProveedor || null,
+          p_fecha_desde: dashDesde || null,
+          p_fecha_hasta: dashHasta || null,
+        }),
+        supabase.rpc("dashboard_ranking", {
+          p_fecha_desde: dashDesde || null,
+          p_fecha_hasta: dashHasta || null,
+        }),
+      ]);
+      if (kpisErr) throw kpisErr;
+      if (rankingErr) throw rankingErr;
+      setKpis(kpisData?.[0] || null);
+      setRanking(rankingData || []);
+
+      let q = supabase.from("viajes")
+        .select("nro_spot, proveedor, fecha_carga, realizado, rutas, estado_validacion_ia, estado_final", { count: "exact" })
+        .order("fecha_registro", { ascending: false })
+        .range(pagina * DETALLE_POR_PAGINA, pagina * DETALLE_POR_PAGINA + DETALLE_POR_PAGINA - 1);
+      if (dashProveedor) q = q.eq("proveedor", dashProveedor);
+      if (dashDesde) q = q.gte("fecha_registro", dashDesde);
+      if (dashHasta) q = q.lte("fecha_registro", dashHasta);
+      const { data: detalleData, count, error: detalleErr } = await q;
+      if (detalleErr) throw detalleErr;
+      setDetalle(detalleData || []);
+      setDetalleTotal(count || 0);
+      setDetallePagina(pagina);
+    } catch (err) {
+      console.error("Error cargando dashboard:", err);
+    } finally {
+      setDashLoading(false);
+    }
+  }, [isAdmin, dashProveedor, dashDesde, dashHasta]);
+
+  useEffect(() => {
+    if (vista !== "dashboard" || !isAdmin) return;
+    fetchDashboard(0);
+    const intervalo = setInterval(() => fetchDashboard(detallePagina), 30000);
+    return () => clearInterval(intervalo);
+  }, [vista, isAdmin, dashProveedor, dashDesde, dashHasta]);
+
+  function limpiarFiltrosDashboard() {
+    setDashProveedor(""); setDashDesde(""); setDashHasta("");
   }
 
   function openEditModal(viaje) {
@@ -754,29 +815,39 @@ export default function App() {
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
           )}
         </div>
-        {/* Exportar Excel */}
-        <button onClick={exportarExcel} title="Exportar a Excel"
-          style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          Exportar
-        </button>
+        {isAdmin && (
+          <button onClick={() => setVista(vista === "tabla" ? "dashboard" : "tabla")}
+            style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${vista === "dashboard" ? RED : BORDER}`, background: vista === "dashboard" ? RED : "white", color: vista === "dashboard" ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
+            {vista === "dashboard" ? "Ver tabla" : "Ver dashboard"}
+          </button>
+        )}
+        {vista === "tabla" && (
+          <>
+            {/* Exportar Excel */}
+            <button onClick={exportarExcel} title="Exportar a Excel"
+              style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Exportar
+            </button>
 
-        <button onClick={clearFilters} title="Limpiar filtros"
-          style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-        <button onClick={fetchViajes} title="Actualizar"
-          style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>↻</button>
-        <button onClick={openFilter}
-          style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${filterOpen ? RED : BORDER}`, background: filterOpen ? RED : "white", color: filterOpen ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-          ⚙ Filtrar
-        </button>
+            <button onClick={clearFilters} title="Limpiar filtros"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            <button onClick={fetchViajes} title="Actualizar"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>↻</button>
+            <button onClick={openFilter}
+              style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${filterOpen ? RED : BORDER}`, background: filterOpen ? RED : "white", color: filterOpen ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+              ⚙ Filtrar
+            </button>
+          </>
+        )}
       </div>
 
       {/* DRAWER LATERAL */}
-      {filterOpen && (
+      {vista === "tabla" && filterOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 40 }}>
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.18)" }} onClick={() => setFilterOpen(false)} />
           <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 320, background: "white", boxShadow: "-4px 0 24px rgba(0,0,0,.12)", display: "flex", flexDirection: "column", zIndex: 41 }}
@@ -848,6 +919,7 @@ export default function App() {
       )}
 
       {/* TABLA */}
+      {vista === "tabla" && (
       <div style={{ flex: 1, padding: "14px 18px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div style={{ overflowX: "auto", overflowY: "auto", flex: 1, background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
@@ -987,6 +1059,174 @@ export default function App() {
           </table>
         </div>
       </div>
+      )}
+
+      {/* DASHBOARD */}
+      {vista === "dashboard" && isAdmin && (
+        <div style={{ flex: 1, padding: "14px 18px", overflow: "auto" }}>
+
+          {/* Filtros del dashboard */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 16, paddingBottom: 14, borderBottom: `0.5px solid ${BORDER}` }}>
+            <div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Transportista</div>
+              <select value={dashProveedor} onChange={e => setDashProveedor(e.target.value)} style={{ ...inp, width: 170 }}>
+                <option value="">Todos</option>
+                {["MLT","ANDI","TRANSA","JEDA","MUNDO","INDUAMERICA","LELY","RICPAL","HUAYRAZ","A&S","MAKOOL","BSC","E&S","RANSA"].map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro desde</div>
+              <input type="date" value={dashDesde} onChange={e => setDashDesde(e.target.value)} style={{ ...inp, width: 150 }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha registro hasta</div>
+              <input type="date" value={dashHasta} onChange={e => setDashHasta(e.target.value)} style={{ ...inp, width: 150 }} />
+            </div>
+            <button onClick={limpiarFiltrosDashboard} style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 12 }}>
+              Limpiar filtros
+            </button>
+            <button onClick={() => fetchDashboard(detallePagina)} title="Actualizar"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16 }}>↻</button>
+            {dashLoading && <span style={{ fontSize: 11, color: GRAY_500 }}>Actualizando…</span>}
+          </div>
+
+          {kpis && (
+            <>
+              {/* Tarjetas de KPI */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Tickets generados</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.total_tickets}</div>
+                </div>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Validados (ejecución)</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_validados_ejecucion} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.total_tickets}</span></div>
+                </div>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo transportista</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_realizados}</span></div>
+                </div>
+                <div style={{ background: RED_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: RED_DARK, marginBottom: 6 }}>Rechazados por IA</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: RED_DARK }}>{kpis.tickets_rechazados_ia}</div>
+                </div>
+                <div style={{ background: GREEN_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GREEN, marginBottom: 6 }}>Listos para migrar</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: GREEN }}>{kpis.tickets_listos_migrar}</div>
+                </div>
+              </div>
+
+              {/* Cascada — barra horizontal segmentada */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
+                {(() => {
+                  const total = kpis.total_tickets || 1;
+                  const segs = [
+                    { label: "No realizados", val: kpis.cascada_no_realizados, color: GRAY_500 },
+                    { label: "Pendiente subir", val: kpis.cascada_pendiente_subir, color: AMBER },
+                    { label: "Pendiente validar", val: kpis.cascada_pendiente_validar, color: RED_DARK },
+                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar, color: GREEN },
+                  ];
+                  return (
+                    <>
+                      <div style={{ display: "flex", width: "100%", height: 28, borderRadius: 6, overflow: "hidden" }}>
+                        {segs.map(s => (
+                          <div key={s.label} title={`${s.label}: ${s.val}`} style={{ width: `${(s.val / total) * 100}%`, background: s.color, minWidth: s.val > 0 ? 3 : 0 }} />
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10, fontSize: 11, color: GRAY_500 }}>
+                        {segs.map(s => (
+                          <span key={s.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
+                            {s.label}: {s.val}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </>
+          )}
+
+          {/* Ranking por transportista */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Ranking por transportista</div>
+            <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr style={{ background: GRAY_50 }}>
+                    {["Proveedor","Total","Realizados","No realiz.","Pend. subir","Pend. validar","Listos migrar","% Avance"].map(h => (
+                      <th key={h} style={{ padding: "8px 10px", textAlign: h === "Proveedor" ? "left" : "right", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranking.map(r => (
+                    <tr key={r.proveedor}>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{r.proveedor}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.total}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.realizados}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.no_realizados}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}` }}>{r.pendiente_subir}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}`, color: r.pendiente_validar > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validar}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", borderBottom: `0.5px solid ${BORDER}`, fontWeight: 500 }}>{r.pct_avance ?? 0}%</td>
+                    </tr>
+                  ))}
+                  {ranking.length === 0 && (
+                    <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin datos para el rango seleccionado</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Detalle de tickets filtrados */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900 }}>Detalle de tickets filtrados</div>
+              <div style={{ fontSize: 11, color: GRAY_500 }}>Mostrando {detalle.length ? detallePagina * DETALLE_POR_PAGINA + 1 : 0}-{detallePagina * DETALLE_POR_PAGINA + detalle.length} de {detalleTotal}</div>
+            </div>
+            <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr style={{ background: GRAY_50 }}>
+                    {["N° SPOT","Proveedor","Fecha servicio","Realizado","N° GR","Validación IA","Estado final"].map(h => (
+                      <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {detalle.map(t => (
+                    <tr key={t.nro_spot}>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}`, fontFamily: "monospace", fontSize: 10 }}>{t.nro_spot}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.proveedor || "—"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.fecha_carga ? fmtFechaSolo(t.fecha_carga) : "—"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.realizado || "—"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.rutas || "—"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}`, color: t.estado_validacion_ia === "COINCIDE" ? GREEN : t.estado_validacion_ia === "NO_COINCIDE" ? RED_DARK : GRAY_500 }}>{t.estado_validacion_ia || "—"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}`, fontWeight: 500 }}>{t.estado_final || "—"}</td>
+                    </tr>
+                  ))}
+                  {detalle.length === 0 && (
+                    <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin registros</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+              <button onClick={() => fetchDashboard(Math.max(0, detallePagina - 1))} disabled={detallePagina === 0}
+                style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${BORDER}`, background: "white", fontSize: 12, cursor: detallePagina === 0 ? "default" : "pointer", color: detallePagina === 0 ? GRAY_200 : GRAY_900 }}>Anterior</button>
+              <span style={{ fontSize: 11, color: GRAY_500 }}>Página {detallePagina + 1} de {Math.max(1, Math.ceil(detalleTotal / DETALLE_POR_PAGINA))}</span>
+              <button onClick={() => fetchDashboard(detallePagina + 1)} disabled={(detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal}
+                style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${BORDER}`, background: "white", fontSize: 12, cursor: (detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal ? "default" : "pointer", color: (detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal ? GRAY_200 : GRAY_900 }}>Siguiente</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL EDICIÓN PLACA / RUTAS */}
       {/* MODAL CAMBIAR CONTRASEÑA */}
