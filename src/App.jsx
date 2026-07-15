@@ -261,14 +261,10 @@ export default function App() {
 
   const [kpis, setKpis] = useState(null);
   const [ranking, setRanking] = useState([]);
-  const [detalle, setDetalle] = useState([]);
-  const [detalleTotal, setDetalleTotal] = useState(0);
-  const [detallePagina, setDetallePagina] = useState(0);
   const [dashLoading, setDashLoading] = useState(false);
-  const [detalleAbierto, setDetalleAbierto] = useState(false);
+  const [cascadaDetalleModal, setCascadaDetalleModal] = useState(null);
   const [rankingSortCol, setRankingSortCol] = useState(null);
   const [rankingSortDir, setRankingSortDir] = useState("desc");
-  const DETALLE_POR_PAGINA = 10;
   
   const [pwModalOpen,  setPwModalOpen]  = useState(false);
   const [pwNueva,      setPwNueva]      = useState("");
@@ -669,7 +665,7 @@ export default function App() {
   const initials= (session?.user?.email || "U").substring(0, 2).toUpperCase();
   const inp     = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
 
-  const fetchDashboard = useCallback(async (pagina = 0) => {
+  const fetchDashboard = useCallback(async () => {
     if (!isAdmin) return;
     setDashLoading(true);
     try {
@@ -688,20 +684,6 @@ export default function App() {
       if (rankingErr) throw rankingErr;
       setKpis(kpisData?.[0] || null);
       setRanking(rankingData || []);
-
-      // Actualizado a fecha_carga para unificar visualización
-      let q = supabase.from("viajes")
-        .select("nro_spot, proveedor, fecha_carga, realizado, rutas, estado_validacion_ia, estado_final", { count: "exact" })
-        .order("fecha_carga", { ascending: false }) 
-        .range(pagina * DETALLE_POR_PAGINA, pagina * DETALLE_POR_PAGINA + DETALLE_POR_PAGINA - 1);
-      if (dashProveedor) q = q.eq("proveedor", dashProveedor);
-      if (dashDesde) q = q.gte("fecha_carga", dashDesde);
-      if (dashHasta) q = q.lte("fecha_carga", dashHasta);
-      const { data: detalleData, count, error: detalleErr } = await q;
-      if (detalleErr) throw detalleErr;
-      setDetalle(detalleData || []);
-      setDetalleTotal(count || 0);
-      setDetallePagina(pagina);
     } catch (err) {
       console.error("Error cargando dashboard:", err);
     } finally {
@@ -709,10 +691,38 @@ export default function App() {
     }
   }, [isAdmin, dashProveedor, dashDesde, dashHasta]);
 
+  // Condiciones de cada bloque de la cascada, para el detalle por clic (todos menos "Total")
+  const CASCADA_CONDICIONES = {
+    "No confirmados":    q => q.is("realizado", null),
+    "No realizados":     q => q.eq("realizado", "NO"),
+    "Pendiente escaneo": q => q.eq("realizado", "SI").is("foto_url", null).eq("estado_final", "PENDIENTE"),
+    "Observado IA":      q => q.eq("realizado", "SI").eq("estado_final", "OBSERVADO"),
+    "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO"),
+  };
+
+  async function abrirDetalleCascada(categoria) {
+    const condicion = CASCADA_CONDICIONES[categoria];
+    if (!condicion) return; // "Total tickets" no tiene popup -- se ve desfiltrando la tabla general
+    setCascadaDetalleModal({ categoria, cargando: true, filas: [] });
+    try {
+      let q = supabase.from("viajes").select("*").order("fecha_carga", { ascending: false }).limit(300);
+      if (dashProveedor) q = q.eq("proveedor", dashProveedor);
+      if (dashDesde) q = q.gte("fecha_carga", dashDesde);
+      if (dashHasta) q = q.lte("fecha_carga", dashHasta);
+      q = condicion(q);
+      const { data, error } = await q;
+      if (error) throw error;
+      setCascadaDetalleModal({ categoria, cargando: false, filas: data || [] });
+    } catch (err) {
+      console.error("Error cargando detalle de cascada:", err);
+      setCascadaDetalleModal({ categoria, cargando: false, filas: [], error: true });
+    }
+  }
+
   useEffect(() => {
     if (vista !== "dashboard" || !isAdmin) return;
-    fetchDashboard(0);
-    const intervalo = setInterval(() => fetchDashboard(detallePagina), 30000);
+    fetchDashboard();
+    const intervalo = setInterval(() => fetchDashboard(), 30000);
     return () => clearInterval(intervalo);
   }, [vista, isAdmin, dashProveedor, dashDesde, dashHasta]);
 
@@ -1098,7 +1108,7 @@ export default function App() {
             <button onClick={limpiarFiltrosDashboard} style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 12 }}>
               Limpiar filtros
             </button>
-            <button onClick={() => fetchDashboard(detallePagina)} title="Actualizar"
+            <button onClick={() => fetchDashboard()} title="Actualizar"
               style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16 }}>↻</button>
             {dashLoading && <span style={{ fontSize: 11, color: GRAY_500 }}>Actualizando…</span>}
           </div>
@@ -1124,7 +1134,7 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Evidencia Fotográfica</div>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Pendiente Escaneo de Guía</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_requieren_escaneo}</span></div>
                     {(() => {
@@ -1175,16 +1185,18 @@ export default function App() {
                     { label: "Listos para migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, landing: null },
                   ];
 
-                  // Eje Y con "números redondos": encuentra el salto más cercano dentro de {1,2,5,10,...}
-                  // en vez de dividir el máximo en partes iguales (que da saltos raros tipo 0,20,39,59,78).
-                  const N_TICKS = 4;
-                  const rawStep = total > 0 ? total / N_TICKS : 1;
+                  // Eje Y con "números redondos" Y techo ajustado: en vez de forzar siempre 4 marcas
+                  // (lo que a veces deja hasta el doble de espacio vacío arriba, según dónde caiga el
+                  // total), se calcula el múltiplo "lindo" más chico que alcance a cubrir el total —
+                  // así la barra más alta siempre llega a un tamaño consistente, sin importar el valor.
+                  const rawStep = total > 0 ? total / 4 : 1;
                   const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
                   const norm = rawStep / mag;
                   const niceMult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
                   const step = niceMult * mag;
-                  const ejeMax = step * N_TICKS;
-                  const ticks = Array.from({ length: N_TICKS + 1 }, (_, i) => step * i);
+                  const numTicks = total > 0 ? Math.ceil(total / step) : 4;
+                  const ejeMax = step * numTicks;
+                  const ticks = Array.from({ length: numTicks + 1 }, (_, i) => step * i);
                   const escala = ejeMax > 0 ? ALTO_PX / ejeMax : 0;
 
                   const N = barras.length;
@@ -1221,15 +1233,18 @@ export default function App() {
                           }} />
                         ))}
 
-                        {/* Barras */}
+                        {/* Barras — todas clickeables excepto "Total tickets" (esa se ve desfiltrando la tabla general) */}
                         {barras.map((b, i) => (
-                          <div key={b.label} title={`${b.label}: ${b.val} (${pct(b.val)}%)`} style={{
+                          <div key={b.label} title={i === 0 ? b.label : `${b.label}: ${b.val} (${pct(b.val)}%) — clic para ver el detalle`}
+                            onClick={i === 0 ? undefined : () => abrirDetalleCascada(b.label)}
+                            style={{
                             position: "absolute",
                             left: `calc(${i * colPct}% + ${margenPct}%)`,
                             width: `${colPct - margenPct * 2}%`,
                             bottom: b.base * escala,
                             height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
                             background: b.color, borderRadius: 3,
+                            cursor: i === 0 ? "default" : "pointer",
                           }}>
                             <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%)", textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3, whiteSpace: "nowrap" }}>
                               {b.val} ({pct(b.val)}%)
@@ -1263,11 +1278,11 @@ export default function App() {
                   <tr style={{ background: GRAY_50 }}>
                     {[
                       { h: "Proveedor", k: "proveedor" },
-                      { h: "Total", k: "total" },
-                      { h: "Pend. subir", k: "pendiente_subir" },
-                      { h: "Observado", k: "observado" },
-                      { h: "Listos migrar", k: "listos_migrar" },
-                      { h: "% Avance", k: "pct_avance" },
+                      { h: "Tickets Realizados", k: "total" },
+                      { h: "Pend. Escaneo Guía", k: "pendiente_subir" },
+                      { h: "Observado IA", k: "observado" },
+                      { h: "Listos para migrar", k: "listos_migrar" },
+                      { h: "% Avance de cumplimiento", k: "pct_avance" },
                     ].map(({ h, k }, i, arr) => (
                       <th key={h} onClick={() => {
                         if (rankingSortCol === k) setRankingSortDir(d => d === "desc" ? "asc" : "desc");
@@ -1312,61 +1327,62 @@ export default function App() {
               </table>
             </div>
           </div>
-
-          {/* Detalle de tickets filtrados */}
-          <div>
-            <button onClick={() => setDetalleAbierto(o => !o)}
-              style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: detalleAbierto ? 10 : 0, background: "none", border: "none", padding: "6px 0", cursor: "pointer" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ display: "inline-block", transform: detalleAbierto ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s", fontSize: 11, color: GRAY_500 }}>▶</span>
-                Detalle de tickets filtrados
-              </span>
-              <span style={{ fontSize: 11, color: GRAY_500 }}>{detalleAbierto ? `Mostrando ${detalle.length ? detallePagina * DETALLE_POR_PAGINA + 1 : 0}-${detallePagina * DETALLE_POR_PAGINA + detalle.length} de ${detalleTotal}` : `Ver ${detalleTotal} tickets ›`}</span>
-            </button>
-            {detalleAbierto && (
-              <>
-            <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                <thead>
-                  <tr style={{ background: GRAY_50 }}>
-                    {["N° SPOT","Proveedor","Fecha servicio","Realizado","N° GR","Validación IA","Estado final"].map(h => (
-                      <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}` }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {detalle.map(t => (
-                    <tr key={t.nro_spot}>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}`, fontFamily: "monospace", fontSize: 10 }}>{t.nro_spot}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.proveedor || "—"}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.fecha_carga ? fmtFechaSolo(t.fecha_carga) : "—"}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.realizado || "—"}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}` }}>{t.rutas || "—"}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}`, color: t.estado_validacion_ia === "COINCIDE" ? GREEN : t.estado_validacion_ia === "NO_COINCIDE" ? RED_DARK : GRAY_500 }}>{t.estado_validacion_ia || "—"}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: `0.5px solid ${BORDER}`, fontWeight: 500 }}>{t.estado_final || "—"}</td>
-                    </tr>
-                  ))}
-                  {detalle.length === 0 && (
-                    <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin registros</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
-              <button onClick={() => fetchDashboard(Math.max(0, detallePagina - 1))} disabled={detallePagina === 0}
-                style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${BORDER}`, background: "white", fontSize: 12, cursor: detallePagina === 0 ? "default" : "pointer", color: detallePagina === 0 ? GRAY_200 : GRAY_900 }}>Anterior</button>
-              <span style={{ fontSize: 11, color: GRAY_500 }}>Página {detallePagina + 1} de {Math.max(1, Math.ceil(detalleTotal / DETALLE_POR_PAGINA))}</span>
-              <button onClick={() => fetchDashboard(detallePagina + 1)} disabled={(detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal}
-                style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${BORDER}`, background: "white", fontSize: 12, cursor: (detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal ? "default" : "pointer", color: (detallePagina + 1) * DETALLE_POR_PAGINA >= detalleTotal ? GRAY_200 : GRAY_900 }}>Siguiente</button>
-            </div>
-              </>
-            )}
-          </div>
         </div>
       )}
 
         </div>
       </div>
+
+      {/* MODAL DETALLE POR BLOQUE DE LA CASCADA */}
+      {cascadaDetalleModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}
+          onClick={e => e.target === e.currentTarget && setCascadaDetalleModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 20, width: "min(94vw, 1100px)", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexShrink: 0 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: GRAY_900 }}>{cascadaDetalleModal.categoria}</div>
+                <div style={{ fontSize: 11, color: GRAY_500, marginTop: 2 }}>
+                  {cascadaDetalleModal.cargando ? "Cargando…" : `${cascadaDetalleModal.filas.length} ticket${cascadaDetalleModal.filas.length === 1 ? "" : "s"}${cascadaDetalleModal.filas.length === 300 ? " (mostrando los primeros 300)" : ""}`}
+                </div>
+              </div>
+              <button onClick={() => setCascadaDetalleModal(null)} style={{ width: 26, height: 26, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 13, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+            </div>
+            <div style={{ overflow: "auto", border: `0.5px solid ${BORDER}`, borderRadius: 10 }}>
+              {cascadaDetalleModal.cargando ? (
+                <div style={{ padding: 40, textAlign: "center", color: GRAY_500, fontSize: 12 }}>Cargando tickets…</div>
+              ) : cascadaDetalleModal.error ? (
+                <div style={{ padding: 40, textAlign: "center", color: RED_DARK, fontSize: 12 }}>Error al cargar el detalle. Intenta de nuevo.</div>
+              ) : cascadaDetalleModal.filas.length === 0 ? (
+                <div style={{ padding: 40, textAlign: "center", color: GRAY_500, fontSize: 12 }}>No hay tickets en esta categoría para el rango filtrado.</div>
+              ) : (
+                <table style={{ borderCollapse: "collapse", fontSize: 11, whiteSpace: "nowrap" }}>
+                  <thead>
+                    <tr style={{ background: GRAY_50 }}>
+                      {COLS.map(c => (
+                        <th key={c.key} style={{ padding: "7px 9px", textAlign: "left", fontSize: 9, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, position: "sticky", top: 0, background: GRAY_50 }}>{c.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cascadaDetalleModal.filas.map(fila => (
+                      <tr key={fila.nro_spot}>
+                        {COLS.map(c => {
+                          let val = fila[c.key];
+                          if (c.key === "fecha_carga") val = val ? fmtFechaSolo(val) : "—";
+                          else if (val === null || val === undefined || val === "") val = "—";
+                          return (
+                            <td key={c.key} style={{ padding: "7px 9px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: val === "—" ? GRAY_200 : GRAY_900, fontFamily: c.mono ? "monospace" : "inherit" }}>{String(val)}</td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {pwModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
