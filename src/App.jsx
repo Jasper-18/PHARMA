@@ -274,20 +274,24 @@ export default function App() {
   const [pwOk,         setPwOk]         = useState(false);
   const [editPlaca,    setEditPlaca]    = useState("");
   const [editRutaInput,setEditRutaInput]= useState("");
+  const [editPlaca2,   setEditPlaca2]   = useState("");
+  const [editRuta2Input,setEditRuta2Input]= useState("");
+  const [editPlaca3,   setEditPlaca3]   = useState("");
+  const [editRuta3Input,setEditRuta3Input]= useState("");
+  const [editDocsVisibles, setEditDocsVisibles] = useState(1);
   const [editSaving,   setEditSaving]   = useState(false);
   const [editErr,      setEditErr]      = useState("");
-  const [uploading,    setUploading]    = useState(false);
-  const [uploadFile,   setUploadFile]   = useState(null);
-  const [uploadErr,    setUploadErr]    = useState("");
-  const [uploadSuccess,setUploadSuccess]= useState(false);
-  const [validandoIA,  setValidandoIA]  = useState(false);
-  const [resultadoIA,  setResultadoIA]  = useState(null);
+  // Estado de subida por documento: uploadState[1|2|3] = {file, err, uploading, validando, resultado, success}
+  const [uploadState,  setUploadState]  = useState({});
 
   const [validModal,   setValidModal]   = useState(null);
   const [validSaving,  setValidSaving]  = useState(false);
   const [validErr,     setValidErr]     = useState("");
 
-  const fileRef    = useRef();
+  const fileRef1   = useRef();
+  const fileRef2   = useRef();
+  const fileRef3   = useRef();
+  const fileRefFor = (d) => d === 1 ? fileRef1 : d === 2 ? fileRef2 : fileRef3;
   const userMenuRef= useRef();
   const fetchViajesRef = useRef(null);
 
@@ -386,16 +390,29 @@ export default function App() {
     setEditModal(viaje);
     setEditPlaca(viaje.placa || "");
     setEditRutaInput(viaje.rutas || "");
+    setEditPlaca2(viaje.placa_2 || "");
+    setEditRuta2Input(viaje.rutas_2 || "");
+    setEditPlaca3(viaje.placa_3 || "");
+    setEditRuta3Input(viaje.rutas_3 || "");
+    setEditDocsVisibles(viaje.placa_3 ? 3 : viaje.placa_2 ? 2 : 1);
     setEditErr("");
   }
 
   const PLACA_RE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
 
   async function saveEdit() {
-    if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido. Usa ABC-123."); return; }
+    if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido en Placa 1. Usa ABC-123."); return; }
+    if (editDocsVisibles >= 2 && editPlaca2 && !PLACA_RE.test(editPlaca2)) { setEditErr("Formato inválido en Placa 2. Usa ABC-123."); return; }
+    if (editDocsVisibles >= 3 && editPlaca3 && !PLACA_RE.test(editPlaca3)) { setEditErr("Formato inválido en Placa 3. Usa ABC-123."); return; }
     setEditSaving(true); setEditErr("");
     try {
-      const payload = { placa: editPlaca || null, rutas: editRutaInput.trim() || null };
+      const payload = {
+        placa: editPlaca || null, rutas: editRutaInput.trim() || null,
+        placa_2: editDocsVisibles >= 2 ? (editPlaca2 || null) : null,
+        rutas_2: editDocsVisibles >= 2 ? (editRuta2Input.trim() || null) : null,
+        placa_3: editDocsVisibles >= 3 ? (editPlaca3 || null) : null,
+        rutas_3: editDocsVisibles >= 3 ? (editRuta3Input.trim() || null) : null,
+      };
       const { data, error } = await supabase
         .from("viajes")
         .update(payload)
@@ -403,9 +420,7 @@ export default function App() {
         .select();
       if (error) throw error;
       setViajes(prev => prev.map(v =>
-        v.nro_spot === editModal.nro_spot
-          ? { ...v, placa: payload.placa, rutas: payload.rutas }
-          : v
+        v.nro_spot === editModal.nro_spot ? { ...v, ...payload } : v
       ));
       setEditModal(null);
     } catch (err) {
@@ -562,6 +577,14 @@ export default function App() {
     }
   }
 
+  const SUF = (d) => d === 1 ? "" : `_${d}`;
+  const docState = (d) => uploadState[d] || { file: null, err: "", uploading: false, validando: false, resultado: null, success: false };
+  const setDocState = (d, patch) => setUploadState(prev => ({ ...prev, [d]: { ...(prev[d] || { file: null, err: "", uploading: false, validando: false, resultado: null, success: false }), ...patch } }));
+
+  function docsDeclarados(viaje) {
+    return [1, viaje?.placa_2 ? 2 : null, viaje?.placa_3 ? 3 : null].filter(Boolean);
+  }
+
   function openModal(viaje) {
     const faltaPlaca = !viaje.placa || viaje.placa.trim() === "";
     const faltaRutas = !viaje.rutas || viaje.rutas.trim() === "";
@@ -571,71 +594,87 @@ export default function App() {
     } else {
       setModal(viaje);
     }
-    setUploadFile(null); setUploadErr(""); setUploadSuccess(false); setValidandoIA(false); setResultadoIA(null);
+    setUploadState({});
   }
 
-  function handleFileSelect(file) {
+  function handleFileSelect(docIndex, file) {
     if (!file) return;
-    if (file.size > MAX_MB * 1024 * 1024) { setUploadErr(`El archivo supera los ${MAX_MB} MB.`); setUploadFile(null); return; }
-    setUploadErr(""); setUploadFile(file);
+    if (file.size > MAX_MB * 1024 * 1024) { setDocState(docIndex, { err: `El archivo supera los ${MAX_MB} MB.`, file: null }); return; }
+    setDocState(docIndex, { err: "", file });
   }
 
-  async function handleUpload() {
-    if (!uploadFile || !modal) return;
-    setUploading(true); setUploadErr("");
+  async function handleUpload(docIndex) {
+    const st = docState(docIndex);
+    if (!st.file || !modal) return;
+    const suf = SUF(docIndex);
+    setDocState(docIndex, { uploading: true, err: "" });
     try {
-      const compressed = await comprimirImagen(uploadFile);
-      const versiones  = modal.foto_versiones || [];
+      const compressed = await comprimirImagen(st.file);
+      const versiones  = modal[`foto_versiones${suf}`] || [];
       const nv  = versiones.length + 1;
       const ext = compressed.name.split(".").pop();
       const nroCorto = extraerNroSpotCorto(modal.nro_spot);
-      const fileName = `${nroCorto}_v${nv}.${ext}`;
+      const fileName = `${nroCorto}_doc${docIndex}_v${nv}.${ext}`;
       const path = `${modal.proveedor}/${modal.nro_spot}/${fileName}`;
       const { error: upErr } = await supabase.storage.from("documentos").upload(path, compressed, { upsert: true });
       if (upErr) throw upErr;
-      
+
       const nuevasVersiones = [...versiones, { v: nv, path, nombre: fileName, subido_por: session.user.email, subido_en: new Date().toISOString() }];
       const ahora = new Date().toISOString();
-      const { error: dbErr } = await supabase.from("viajes").update({
-        foto_versiones:    nuevasVersiones,
-        foto_url:          path,           
-        foto_nombre:       fileName,
-        subido_por:        session.user.email,
-        subido_en:         ahora,
+      const intentosPrevios = modal[`intentos_ia${suf}`] || 0;
+      const payload = {
+        [`foto_versiones${suf}`]: nuevasVersiones,
+        [`foto_url${suf}`]: path,
+        [`foto_nombre${suf}`]: fileName,
+        [`estado_procesamiento_ia${suf}`]: null,
+        [`intentos_ia${suf}`]: intentosPrevios + 1,
+        subido_por: session.user.email,
+        subido_en: ahora,
         fecha_entrega_doc: versiones.length === 0 ? ahora : modal.fecha_entrega_doc,
-        estado_doc:        "Completo",
-        estado_procesamiento_ia: null, 
-      }).eq("nro_spot", modal.nro_spot);
+        estado_doc: "Completo",
+      };
+      const { error: dbErr } = await supabase.from("viajes").update(payload).eq("nro_spot", modal.nro_spot);
       if (dbErr) throw dbErr;
 
-      setUploading(false);
-      setValidandoIA(true);
+      setDocState(docIndex, { uploading: false, validando: true });
+      setModal(prev => ({ ...prev, ...payload }));
 
       let resultado = null;
       try {
         const resp = await fetch("/api/procesar-ocr", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ nro_spot: modal.nro_spot }),
+          body: JSON.stringify({ nro_spot: modal.nro_spot, documento: docIndex }),
         });
         if (resp.ok) resultado = await resp.json();
       } catch { }
 
-      setValidandoIA(false);
-      setResultadoIA(resultado); 
-      setViajes(prev => prev.map(v => v.nro_spot === modal.nro_spot
-        ? { ...v, foto_versiones: nuevasVersiones, foto_url: path, foto_nombre: fileName,
-            subido_por: session.user.email, subido_en: ahora, estado_doc: "Completo",
-            ...(resultado || {}) }
-        : v));
+      let resPayload = {};
+      if (resultado) {
+        resPayload = {
+          [`estado_procesamiento_ia${suf}`]: resultado.estado_procesamiento_ia,
+          [`estado_validacion_ia${suf}`]: resultado.estado_validacion_ia,
+          [`texto_detectado_ia${suf}`]: resultado.texto_detectado_ia,
+          [`match_ia${suf}`]: resultado.match_ia,
+        };
+        setModal(prev => ({ ...prev, ...resPayload }));
+      }
 
-      setUploadSuccess(true);
+      setDocState(docIndex, { validando: false, resultado, success: true });
+      setViajes(prev => prev.map(v => v.nro_spot === modal.nro_spot ? { ...v, ...payload, ...resPayload } : v));
       fetchViajes();
+
       const cierraSolo = !resultado || resultado.estado_validacion_ia !== "NO_COINCIDE";
-      if (cierraSolo) setTimeout(() => { setModal(null); setResultadoIA(null); }, 2200);
+      if (cierraSolo) {
+        setTimeout(() => {
+          if (docsDeclarados(modal).length === 1) {
+            setModal(null);
+          }
+          setDocState(docIndex, { success: false, resultado: null, file: null });
+        }, 2200);
+      }
     } catch (err) {
-      setUploadErr(err.message || "Error al subir el archivo.");
-      setUploading(false);
+      setDocState(docIndex, { err: err.message || "Error al subir el archivo.", uploading: false });
     }
   }
 
@@ -644,16 +683,16 @@ export default function App() {
     setValidSaving(true); setValidErr("");
     try {
       const ahora = new Date().toISOString();
-      const { error } = await supabase.from("viajes").update({
-        estado_validacion_ia: "MANUAL",
-        estado_final:         "FINALIZADO",
-        usuario_modif:        session.user.email,
-        fecha_modif:          ahora,
-      }).eq("nro_spot", validModal.nro_spot);
+      // Marca MANUAL en TODOS los documentos que este ticket tenga declarados (no solo el 1) --
+      // el trigger de la base de datos es quien decide estado_final según si ya todos quedaron OK,
+      // así este botón no puede finalizar un ticket con un 2do/3er documento aún pendiente.
+      const payload = { estado_validacion_ia: "MANUAL", usuario_modif: session.user.email, fecha_modif: ahora };
+      if (validModal.placa_2) payload.estado_validacion_ia_2 = "MANUAL";
+      if (validModal.placa_3) payload.estado_validacion_ia_3 = "MANUAL";
+
+      const { data, error } = await supabase.from("viajes").update(payload).eq("nro_spot", validModal.nro_spot).select().single();
       if (error) throw error;
-      setViajes(prev => prev.map(v => v.nro_spot === validModal.nro_spot
-        ? { ...v, estado_validacion_ia: "MANUAL", estado_final: "FINALIZADO", usuario_modif: session.user.email, fecha_modif: ahora }
-        : v));
+      setViajes(prev => prev.map(v => v.nro_spot === validModal.nro_spot ? { ...v, ...data } : v));
       setValidModal(null);
     } catch (err) { setValidErr(err.message || "Error al validar."); }
     finally { setValidSaving(false); }
@@ -1134,7 +1173,7 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo de Guías</div>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Pendiente Escaneo de Guía</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_requieren_escaneo}</span></div>
                     {(() => {
@@ -1474,6 +1513,7 @@ export default function App() {
               <button onClick={() => setEditModal(null)} disabled={editSaving} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{editModal.nro_spot}</div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Guía 1</div>
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
               <input value={editPlaca} onChange={e => { setEditPlaca(e.target.value.toUpperCase()); setEditErr(""); }}
@@ -1483,10 +1523,61 @@ export default function App() {
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° GR</div>
               <input value={editRutaInput} onChange={e => { setEditRutaInput(e.target.value); setEditErr(""); }}
-                onKeyDown={e => e.key === "Enter" && (e.preventDefault(), !editSaving && saveEdit())}
                 style={{ ...inp, width: "100%", boxSizing: "border-box", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
-              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Presiona Enter para guardar.</div>
             </div>
+
+            {editDocsVisibles >= 2 && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".04em" }}>Guía 2</div>
+                  {editDocsVisibles === 2 && (
+                    <button onClick={() => { setEditPlaca2(""); setEditRuta2Input(""); setEditDocsVisibles(1); }}
+                      style={{ background: "none", border: "none", color: RED_DARK, fontSize: 10, cursor: "pointer" }}>Quitar</button>
+                  )}
+                </div>
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
+                  <input value={editPlaca2} onChange={e => { setEditPlaca2(e.target.value.toUpperCase()); setEditErr(""); }}
+                    maxLength={7}
+                    style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+                </div>
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° GR</div>
+                  <input value={editRuta2Input} onChange={e => { setEditRuta2Input(e.target.value); setEditErr(""); }}
+                    style={{ ...inp, width: "100%", boxSizing: "border-box", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+                </div>
+              </>
+            )}
+
+            {editDocsVisibles >= 3 && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".04em" }}>Guía 3</div>
+                  <button onClick={() => { setEditPlaca3(""); setEditRuta3Input(""); setEditDocsVisibles(2); }}
+                    style={{ background: "none", border: "none", color: RED_DARK, fontSize: 10, cursor: "pointer" }}>Quitar</button>
+                </div>
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
+                  <input value={editPlaca3} onChange={e => { setEditPlaca3(e.target.value.toUpperCase()); setEditErr(""); }}
+                    maxLength={7}
+                    style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+                </div>
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° GR</div>
+                  <input value={editRuta3Input} onChange={e => { setEditRuta3Input(e.target.value); setEditErr(""); }}
+                    onKeyDown={e => e.key === "Enter" && (e.preventDefault(), !editSaving && saveEdit())}
+                    style={{ ...inp, width: "100%", boxSizing: "border-box", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
+                </div>
+              </>
+            )}
+
+            {editDocsVisibles < 3 && (
+              <button onClick={() => setEditDocsVisibles(d => d + 1)}
+                style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: `1px dashed ${BORDER}`, borderRadius: 8, padding: "8px 12px", fontSize: 11, color: GRAY_500, cursor: "pointer", marginBottom: 18, width: "100%", justifyContent: "center" }}>
+                + Agregar guía
+              </button>
+            )}
+            <div style={{ fontSize: 10, color: GRAY_500, marginTop: -10, marginBottom: 16 }}>Presiona Enter en el último campo para guardar.</div>
             {editErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>⚠ {editErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setEditModal(null)} disabled={editSaving} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
@@ -1534,9 +1625,9 @@ export default function App() {
       {modal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && setModal(null)}>
-          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 390, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>{modal._bloqueado ? "Campos incompletos" : "Subir documento"}</div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>{modal._bloqueado ? "Campos incompletos" : "Subir documento(s)"}</div>
               <button onClick={() => setModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, fontFamily: "monospace" }}>{modal.nro_spot}</div>
@@ -1559,63 +1650,93 @@ export default function App() {
                   </button>
                 </div>
               </div>
-            ) : uploadSuccess ? (
-              <div style={{ textAlign: "center", padding: "24px 0" }}>
-                {!resultadoIA ? (
-                  <>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                    <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Documento guardado correctamente</div>
-                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 6 }}>La validación automática se completará en breve.</div>
-                  </>
-                ) : resultadoIA.estado_validacion_ia === "COINCIDE" ? (
-                  <>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                    <div style={{ fontSize: 13, color: GREEN, fontWeight: 500 }}>Documento validado correctamente</div>
-                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 6 }}>Coincidencia: {resultadoIA.match_ia}%</div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
-                    <div style={{ fontSize: 13, color: AMBER, fontWeight: 500 }}>El documento no coincide con lo registrado</div>
-                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 6 }}>Detectado: {resultadoIA.texto_detectado_ia || "—"} ({resultadoIA.match_ia ?? 0}%)</div>
-                    <div style={{ fontSize: 11, color: GRAY_500, marginTop: 4 }}>Un administrador revisará tu documento.</div>
-                    <button onClick={() => { setModal(null); setResultadoIA(null); }}
-                      style={{ marginTop: 14, padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>
-                      Entendido
-                    </button>
-                  </>
-                )}
-              </div>
-            ) : validandoIA ? (
-              <div style={{ textAlign: "center", padding: "24px 0" }}>
-                <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
-                <div style={{ fontSize: 13, color: GRAY_500 }}>Validando documento...</div>
-              </div>
             ) : (
               <>
-                {(modal.foto_versiones?.length || 0) > 0 && (
-                  <div style={{ marginBottom: 14, padding: "10px 12px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN }}>
-                    ✓ Ya tienes {modal.foto_versiones.length} documento(s) subido(s). Puedes agregar otro si necesitas corregir.
-                  </div>
-                )}
-                <div onClick={() => fileRef.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFileSelect(e.dataTransfer.files[0]); }}
-                  style={{ border: `1.5px dashed ${GRAY_200}`, borderRadius: 10, padding: "22px 16px", textAlign: "center", cursor: "pointer", marginBottom: 12 }}>
-                  <div style={{ fontSize: 22, color: GRAY_200, marginBottom: 6 }}>📷</div>
-                  <div style={{ fontSize: 12, color: GRAY_500 }}>{uploadFile ? uploadFile.name : "Clic o arrastra tu foto aquí"}</div>
-                </div>
-                {uploadFile && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: GRAY_100, borderRadius: 8, fontSize: 11, color: GRAY_900, marginBottom: 12, border: `0.5px solid ${BORDER}` }}>
-                    <span>📎</span><span style={{ flex: 1 }}>Archivo: {uploadFile.name}</span>
-                  </div>
-                )}
-                {uploadErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12, border: `0.5px solid #f7c1c1` }}>⚠ {uploadErr}</div>}
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFileSelect(e.target.files[0])} />
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button onClick={() => setModal(null)} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
-                  <button onClick={handleUpload} disabled={!uploadFile || uploading}
-                    style={{ padding: "7px 16px", background: uploadFile && !uploading ? RED : GRAY_200, color: uploadFile && !uploading ? "white" : GRAY_500, border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: uploadFile && !uploading ? "pointer" : "default" }}>
-                    {uploading ? "Subiendo..." : "Guardar documento"}
-                  </button>
+                {docsDeclarados(modal).map((docIndex, i) => {
+                  const suf = SUF(docIndex);
+                  const st = docState(docIndex);
+                  const intentos = modal[`intentos_ia${suf}`] || 0;
+                  const yaCoincide = modal[`estado_validacion_ia${suf}`] === "COINCIDE";
+                  const bloqueadoPorIntentos = intentos >= 3 && !yaCoincide;
+                  const nDocs = docsDeclarados(modal).length;
+
+                  return (
+                    <div key={docIndex} style={{ marginBottom: i < nDocs - 1 ? 22 : 0, paddingBottom: i < nDocs - 1 ? 20 : 0, borderBottom: i < nDocs - 1 ? `0.5px solid ${BORDER}` : "none" }}>
+                      {nDocs > 1 && (
+                        <div style={{ fontSize: 11, fontWeight: 600, color: GRAY_900, marginBottom: 8 }}>
+                          Documento {docIndex} — Placa {modal[`placa${suf}`] || "—"} / GR {modal[`rutas${suf}`] || "—"}
+                        </div>
+                      )}
+
+                      {bloqueadoPorIntentos ? (
+                        <div style={{ padding: "12px 14px", background: RED_LIGHT, borderRadius: 10, border: "0.5px solid #f7c1c1" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: RED_DARK, marginBottom: 4 }}>Se alcanzó el máximo de intentos</div>
+                          <div style={{ fontSize: 11, color: RED_DARK }}>Un administrador validará el ticket manualmente.</div>
+                        </div>
+                      ) : st.success ? (
+                        <div style={{ textAlign: "center", padding: "16px 0" }}>
+                          {!st.resultado ? (
+                            <>
+                              <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+                              <div style={{ fontSize: 12, color: GREEN, fontWeight: 500 }}>Documento guardado correctamente</div>
+                              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>La validación automática se completará en breve.</div>
+                            </>
+                          ) : st.resultado.estado_validacion_ia === "COINCIDE" ? (
+                            <>
+                              <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+                              <div style={{ fontSize: 12, color: GREEN, fontWeight: 500 }}>Documento validado correctamente</div>
+                              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Coincidencia: {st.resultado.match_ia}%</div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ fontSize: 28, marginBottom: 6 }}>⚠️</div>
+                              <div style={{ fontSize: 12, color: AMBER, fontWeight: 500 }}>El documento no coincide con lo registrado</div>
+                              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Detectado: {st.resultado.texto_detectado_ia || "—"} ({st.resultado.match_ia ?? 0}%)</div>
+                              <div style={{ fontSize: 10, color: GRAY_500, marginTop: 2 }}>Intento {intentos} de 3. Un administrador revisará tu documento.</div>
+                              <button onClick={() => setDocState(docIndex, { success: false, resultado: null, file: null })}
+                                style={{ marginTop: 10, padding: "6px 16px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 11, cursor: "pointer", color: GRAY_900 }}>
+                                Entendido
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : st.validando ? (
+                        <div style={{ textAlign: "center", padding: "16px 0" }}>
+                          <div style={{ fontSize: 20, marginBottom: 6 }}>⏳</div>
+                          <div style={{ fontSize: 12, color: GRAY_500 }}>Validando documento...</div>
+                        </div>
+                      ) : (
+                        <>
+                          {(modal[`foto_versiones${suf}`]?.length || 0) > 0 && (
+                            <div style={{ marginBottom: 10, padding: "8px 10px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 11, color: GREEN }}>
+                              ✓ Ya tienes {modal[`foto_versiones${suf}`].length} documento(s) subido(s) aquí. Intento {intentos} de 3.
+                            </div>
+                          )}
+                          <div onClick={() => fileRefFor(docIndex).current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFileSelect(docIndex, e.dataTransfer.files[0]); }}
+                            style={{ border: `1.5px dashed ${GRAY_200}`, borderRadius: 10, padding: "18px 14px", textAlign: "center", cursor: "pointer", marginBottom: 10 }}>
+                            <div style={{ fontSize: 20, color: GRAY_200, marginBottom: 4 }}>📷</div>
+                            <div style={{ fontSize: 11, color: GRAY_500 }}>{st.file ? st.file.name : "Clic o arrastra tu foto aquí"}</div>
+                          </div>
+                          {st.file && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: GRAY_100, borderRadius: 8, fontSize: 10, color: GRAY_900, marginBottom: 10, border: `0.5px solid ${BORDER}` }}>
+                              <span>📎</span><span style={{ flex: 1 }}>Archivo: {st.file.name}</span>
+                            </div>
+                          )}
+                          {st.err && <div style={{ padding: "7px 10px", background: RED_LIGHT, borderRadius: 8, fontSize: 10, color: RED_DARK, marginBottom: 10, border: `0.5px solid #f7c1c1` }}>⚠ {st.err}</div>}
+                          <input ref={fileRefFor(docIndex)} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFileSelect(docIndex, e.target.files[0])} />
+                          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                            <button onClick={() => handleUpload(docIndex)} disabled={!st.file || st.uploading}
+                              style={{ padding: "6px 14px", background: st.file && !st.uploading ? RED : GRAY_200, color: st.file && !st.uploading ? "white" : GRAY_500, border: "none", borderRadius: 8, fontSize: 11, fontWeight: 500, cursor: st.file && !st.uploading ? "pointer" : "default" }}>
+                              {st.uploading ? "Subiendo..." : `Guardar documento ${nDocs > 1 ? docIndex : ""}`}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                  <button onClick={() => setModal(null)} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cerrar</button>
                 </div>
               </>
             )}
