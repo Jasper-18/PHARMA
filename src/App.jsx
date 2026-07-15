@@ -1112,7 +1112,7 @@ export default function App() {
                   <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.total_tickets}</div>
                 </div>
                 <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Validados (ejecución)</div>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Confirmación de Ejecución</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_validados_ejecucion} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.total_tickets}</span></div>
                     {(() => {
@@ -1124,11 +1124,11 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo transportista</div>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Evidencia Fotográfica</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_realizados}</span></div>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_requieren_escaneo}</span></div>
                     {(() => {
-                      const p = kpis.tickets_realizados > 0 ? Math.round((kpis.tickets_con_foto / kpis.tickets_realizados) * 100) : 0;
+                      const p = kpis.tickets_requieren_escaneo > 0 ? Math.round((kpis.tickets_con_foto / kpis.tickets_requieren_escaneo) * 100) : 0;
                       const c = p >= 70 ? GREEN : p >= 40 ? AMBER : RED_DARK;
                       const bg = p >= 70 ? GREEN_LIGHT : p >= 40 ? AMBER_LIGHT : RED_LIGHT;
                       return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p}%</span>;
@@ -1136,7 +1136,7 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ background: RED_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
-                  <div style={{ fontSize: 12, color: RED_DARK, marginBottom: 6 }}>Rechazados por IA</div>
+                  <div style={{ fontSize: 12, color: RED_DARK, marginBottom: 6 }}>Observados por IA</div>
                   <div style={{ fontSize: 24, fontWeight: 600, color: RED_DARK }}>{kpis.tickets_rechazados_ia}</div>
                 </div>
                 <div style={{ background: GREEN_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
@@ -1151,7 +1151,6 @@ export default function App() {
                 {(() => {
                   const total = kpis.total_tickets || 0;
                   const ALTO_PX = 170;
-                  const escala = total > 0 ? ALTO_PX / total : 0;
                   const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
 
                   // landing = altura (en unidades de ticket) donde esta barra "entrega" a la siguiente:
@@ -1159,10 +1158,10 @@ export default function App() {
                   // - cada resta entrega desde su BASE (abajo), porque la siguiente cuelga desde ahí
                   let acumulado = total;
                   const restas = [
-                    { label: "No validados", val: kpis.cascada_no_validados || 0, color: "#ff7676" },
+                    { label: "No confirmados", val: kpis.cascada_no_validados || 0, color: "#ff7676" },
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
-                    { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
-                    { label: "Observado", val: kpis.cascada_observado || 0, color: "#e00000" },
+                    { label: "Pendiente escaneo", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
+                    { label: "Observado IA", val: kpis.cascada_observado || 0, color: "#e00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado, landing: base };
@@ -1173,11 +1172,20 @@ export default function App() {
                   const barras = [
                     { label: "Total tickets", val: total, base: 0, color: "#c20000", landing: total },
                     ...restas,
-                    { label: "Listos migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, landing: null },
+                    { label: "Listos para migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, landing: null },
                   ];
 
+                  // Eje Y con "números redondos": encuentra el salto más cercano dentro de {1,2,5,10,...}
+                  // en vez de dividir el máximo en partes iguales (que da saltos raros tipo 0,20,39,59,78).
                   const N_TICKS = 4;
-                  const ticks = Array.from({ length: N_TICKS + 1 }, (_, i) => Math.round((total * i) / N_TICKS));
+                  const rawStep = total > 0 ? total / N_TICKS : 1;
+                  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+                  const norm = rawStep / mag;
+                  const niceMult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+                  const step = niceMult * mag;
+                  const ejeMax = step * N_TICKS;
+                  const ticks = Array.from({ length: N_TICKS + 1 }, (_, i) => step * i);
+                  const escala = ejeMax > 0 ? ALTO_PX / ejeMax : 0;
 
                   const N = barras.length;
                   const colPct = 100 / N;
@@ -1215,7 +1223,7 @@ export default function App() {
 
                         {/* Barras */}
                         {barras.map((b, i) => (
-                          <div key={b.label} title={`${b.label}: ${pct(b.val)}% — ${b.val} tickets`} style={{
+                          <div key={b.label} title={`${b.label}: ${b.val} (${pct(b.val)}%)`} style={{
                             position: "absolute",
                             left: `calc(${i * colPct}% + ${margenPct}%)`,
                             width: `${colPct - margenPct * 2}%`,
@@ -1223,8 +1231,8 @@ export default function App() {
                             height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
                             background: b.color, borderRadius: 3,
                           }}>
-                            <div style={{ position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3, whiteSpace: "nowrap" }}>
-                              {pct(b.val)}%<br />{b.val} tickets
+                            <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%)", textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+                              {b.val} ({pct(b.val)}%)
                             </div>
                           </div>
                         ))}
@@ -1233,7 +1241,7 @@ export default function App() {
                   );
                 })()}
                 {(() => {
-                  const barrasLabels = ["Total tickets", "No validados", "No realizados", "Pend. subir", "Observado", "Listos migrar"];
+                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Listos para migrar"];
                   return (
                     <div style={{ display: "flex", marginLeft: 32 }}>
                       {barrasLabels.map(l => (
