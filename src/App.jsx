@@ -1134,7 +1134,7 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Pendiente Escaneo de Guía</div>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo de Guías</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_requieren_escaneo}</span></div>
                     {(() => {
