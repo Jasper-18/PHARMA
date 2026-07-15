@@ -902,6 +902,7 @@ export default function App() {
                   <option value="">Todos</option>
                   <option value="FINALIZADO">FINALIZADO</option>
                   <option value="PENDIENTE">PENDIENTE</option>
+                  <option value="OBSERVADO">OBSERVADO</option>
                 </select>
               </div>
               <div>
@@ -966,8 +967,8 @@ export default function App() {
                       let content = v[c.key];
                       if (c.key === "estado_final") {
                         const ef = v.estado_final;
-                        const bg = ef === "FINALIZADO" ? GREEN_LIGHT : ef === "PENDIENTE" ? AMBER_LIGHT : GRAY_100;
-                        const fg = ef === "FINALIZADO" ? GREEN : ef === "PENDIENTE" ? AMBER : GRAY_500;
+                        const bg = ef === "FINALIZADO" ? GREEN_LIGHT : ef === "PENDIENTE" ? AMBER_LIGHT : ef === "OBSERVADO" ? RED_LIGHT : GRAY_100;
+                        const fg = ef === "FINALIZADO" ? GREEN : ef === "PENDIENTE" ? AMBER : ef === "OBSERVADO" ? RED_DARK : GRAY_500;
                         content = ef
                           ? <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{ef}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
@@ -1013,7 +1014,7 @@ export default function App() {
                           </svg>
                         </button>
                       )}
-                      {isAdmin && v.estado_final !== "FINALIZADO" && (
+                      {isAdmin && v.realizado === "SI" && v.estado_final !== "FINALIZADO" && (
                         <button onClick={() => { setValidModal(v); setValidErr(""); }} title="Aprobar adicional"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${BLUE}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={BLUE} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1110,13 +1111,29 @@ export default function App() {
                   <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Tickets generados</div>
                   <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.total_tickets}</div>
                 </div>
-                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                   <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Validados (ejecución)</div>
-                  <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_validados_ejecucion} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.total_tickets}</span></div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_validados_ejecucion} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.total_tickets}</span></div>
+                    {(() => {
+                      const p = kpis.total_tickets > 0 ? Math.round((kpis.tickets_validados_ejecucion / kpis.total_tickets) * 100) : 0;
+                      const c = p >= 70 ? GREEN : p >= 40 ? AMBER : RED_DARK;
+                      const bg = p >= 70 ? GREEN_LIGHT : p >= 40 ? AMBER_LIGHT : RED_LIGHT;
+                      return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p}%</span>;
+                    })()}
+                  </div>
                 </div>
-                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                   <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo transportista</div>
-                  <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_realizados}</span></div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpis.tickets_con_foto} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {kpis.tickets_realizados}</span></div>
+                    {(() => {
+                      const p = kpis.tickets_realizados > 0 ? Math.round((kpis.tickets_con_foto / kpis.tickets_realizados) * 100) : 0;
+                      const c = p >= 70 ? GREEN : p >= 40 ? AMBER : RED_DARK;
+                      const bg = p >= 70 ? GREEN_LIGHT : p >= 40 ? AMBER_LIGHT : RED_LIGHT;
+                      return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p}%</span>;
+                    })()}
+                  </div>
                 </div>
                 <div style={{ background: RED_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
                   <div style={{ fontSize: 12, color: RED_DARK, marginBottom: 6 }}>Rechazados por IA</div>
@@ -1130,7 +1147,7 @@ export default function App() {
 
               {/* Cascada — gráfico real: eje Y, gridlines, y conectores por esquina según corresponda */}
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 34 }}>Estatus de Tickets para Migrar</div>
                 {(() => {
                   const total = kpis.total_tickets || 0;
                   const ALTO_PX = 170;
@@ -1145,7 +1162,7 @@ export default function App() {
                     { label: "No validados", val: kpis.cascada_no_validados || 0, color: "#ff7676" },
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
                     { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
-                    { label: "Pend. validar", val: kpis.cascada_pendiente_validar || 0, color: "#e00000" },
+                    { label: "Observado", val: kpis.cascada_observado || 0, color: "#e00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado, landing: base };
@@ -1216,7 +1233,7 @@ export default function App() {
                   );
                 })()}
                 {(() => {
-                  const barrasLabels = ["Total tickets", "No validados", "No realizados", "Pend. subir", "Pend. validar", "Listos migrar"];
+                  const barrasLabels = ["Total tickets", "No validados", "No realizados", "Pend. subir", "Observado", "Listos migrar"];
                   return (
                     <div style={{ display: "flex", marginLeft: 32 }}>
                       {barrasLabels.map(l => (
@@ -1239,10 +1256,8 @@ export default function App() {
                     {[
                       { h: "Proveedor", k: "proveedor" },
                       { h: "Total", k: "total" },
-                      { h: "Realizados", k: "realizados" },
-                      { h: "No realiz.", k: "no_realizados" },
                       { h: "Pend. subir", k: "pendiente_subir" },
-                      { h: "Pend. validar", k: "pendiente_validar" },
+                      { h: "Observado", k: "observado" },
                       { h: "Listos migrar", k: "listos_migrar" },
                       { h: "% Avance", k: "pct_avance" },
                     ].map(({ h, k }, i, arr) => (
@@ -1273,10 +1288,8 @@ export default function App() {
                       <tr key={r.proveedor || "sin-proveedor"}>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.proveedor ? GRAY_900 : GRAY_500, fontStyle: r.proveedor ? "normal" : "italic" }}>{r.proveedor || "FALTA ASIGNAR"}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.total}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.realizados}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.no_realizados}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.pendiente_subir}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.pendiente_validar > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validar}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.observado > 0 ? RED_DARK : GRAY_900 }}>{r.observado}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}` }}>
                           <span style={{ display: "inline-flex", padding: "2px 10px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bgAvance, color: colorAvance }}>{avance}%</span>
@@ -1285,7 +1298,7 @@ export default function App() {
                     );
                   })}
                   {ranking.length === 0 && (
-                    <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin datos para el rango seleccionado</td></tr>
+                    <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin datos para el rango seleccionado</td></tr>
                   )}
                 </tbody>
               </table>
