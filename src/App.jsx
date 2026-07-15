@@ -6,12 +6,9 @@ const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZnVjY2lyYXVoZWtscHhhZ2dhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc0MzIsImV4cCI6MjA5ODEwMzQzMn0.MH8hJSktS_G3_omz9y48Vsp6PIlPcWdg6s6zdQtUNBo";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
-// Paleta FAPE estricta
-const RED = "#e00000";       
-const RED_DARK = "#c20000";  
-const RED_MID = "#ff4040"; 
-const RED_SOFT = "#ff7676";
-const RED_LIGHT = "#ffcaca"; 
+const RED = "#C8102E";
+const RED_DARK = "#A00D24";
+const RED_LIGHT = "#FCEBEB";
 const GREEN = "#0f6e56";
 const GREEN_LIGHT = "#e1f5ee";
 const AMBER = "#854f0b";
@@ -258,7 +255,7 @@ export default function App() {
   const [dashProveedor, setDashProveedor] = useState("");
   
   // Asignamos D-1 por defecto al dashboard
-  const [dashDesde, setDashDesde] = useState(D1_STR);
+  const [dashDesde, setDashDesde] = useState("");
   const [dashHasta, setDashHasta] = useState(D1_STR);
   const [dashFiltroAbierto, setDashFiltroAbierto] = useState(false);
 
@@ -721,7 +718,7 @@ export default function App() {
 
   function limpiarFiltrosDashboard() {
     setDashProveedor(""); 
-    setDashDesde(D1_STR); 
+    setDashDesde(""); 
     setDashHasta(D1_STR);
   }
 
@@ -1131,83 +1128,100 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Cascada — tipo escalón real con Eje Y y Líneas de conexión */}
+              {/* Cascada — gráfico real: eje Y, gridlines, y conectores por esquina según corresponda */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Cascada de tickets</div>
                 {(() => {
                   const total = kpis.total_tickets || 0;
-                  const ALTO_PX = 200;
+                  const ALTO_PX = 170;
                   const escala = total > 0 ? ALTO_PX / total : 0;
                   const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
 
+                  // landing = altura (en unidades de ticket) donde esta barra "entrega" a la siguiente:
+                  // - la barra Total entrega desde su TOPE (arriba)
+                  // - cada resta entrega desde su BASE (abajo), porque la siguiente cuelga desde ahí
                   let acumulado = total;
                   const restas = [
-                    { label: "No validados", val: kpis.cascada_no_validados || 0, color: RED_LIGHT, textColor: RED_DARK },
-                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: RED_SOFT, textColor: RED_DARK },
-                    { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: RED_MID, textColor: "white" },
-                    { label: "Pend. validar", val: kpis.cascada_pendiente_validar || 0, color: RED_DARK, textColor: "white" },
+                    { label: "No validados", val: kpis.cascada_no_validados || 0, color: "#ff7676" },
+                    { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
+                    { label: "Pend. subir", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
+                    { label: "Pend. validar", val: kpis.cascada_pendiente_validar || 0, color: "#e00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
-                    const barra = { ...r, base, tope: acumulado };
+                    const barra = { ...r, base, tope: acumulado, landing: base };
                     acumulado = base;
                     return barra;
                   });
 
                   const barras = [
-                    { label: "Total tickets", val: total, base: 0, color: RED, textColor: "white" },
+                    { label: "Total tickets", val: total, base: 0, color: "#c20000", landing: total },
                     ...restas,
-                    { label: "Listos migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, textColor: "white" },
+                    { label: "Listos migrar", val: kpis.tickets_listos_migrar || 0, base: 0, color: GREEN, landing: null },
                   ];
 
-                  const marcasY = [0, Math.round(total * 0.25), Math.round(total * 0.5), Math.round(total * 0.75), total];
+                  const N_TICKS = 4;
+                  const ticks = Array.from({ length: N_TICKS + 1 }, (_, i) => Math.round((total * i) / N_TICKS));
+
+                  const N = barras.length;
+                  const colPct = 100 / N;
+                  const margenPct = colPct * 0.14;
 
                   return (
-                    <div style={{ display: "flex", height: ALTO_PX + 70, fontFamily: "sans-serif", paddingTop: 30 }}>
-                      
+                    <div style={{ display: "flex" }}>
                       {/* Eje Y */}
-                      <div style={{ width: 35, display: "flex", flexDirection: "column-reverse", justifyContent: "space-between", alignItems: "flex-end", paddingRight: 10, borderRight: `1px solid ${BORDER}`, height: ALTO_PX, color: GRAY_500, fontSize: 10 }}>
-                        {marcasY.map((m, i) => <span key={i} style={{ lineHeight: 1, position: "relative", top: i === 0 ? 5 : i === marcasY.length - 1 ? -5 : 0 }}>{m}</span>)}
+                      <div style={{ position: "relative", width: 32, height: ALTO_PX, flexShrink: 0 }}>
+                        {ticks.map(t => (
+                          <div key={t} style={{ position: "absolute", bottom: t * escala - 6, right: 6, fontSize: 9, color: GRAY_500 }}>{t}</div>
+                        ))}
                       </div>
 
-                      {/* Contenedor de barras sin overflow hidden para no cortar textos */}
-                      <div style={{ flex: 1, display: "flex", alignItems: "flex-end", height: ALTO_PX, position: "relative", paddingLeft: 10 }}>
-                        
-                        {marcasY.map((m, i) => (
-                          <div key={`y-${i}`} style={{ position: "absolute", bottom: m * escala, left: 10, right: 0, borderTop: `1px dashed ${GRAY_100}`, zIndex: 0 }} />
+                      {/* Área del gráfico */}
+                      <div style={{ position: "relative", flex: 1, height: ALTO_PX }}>
+                        {/* Gridlines horizontales */}
+                        {ticks.map(t => (
+                          <div key={t} style={{ position: "absolute", left: 0, right: 0, bottom: t * escala, borderTop: `1px dashed ${GRAY_200}` }} />
                         ))}
 
-                        {barras.map((b, i) => {
-                          const tieneSiguiente = i < barras.length - 1;
-                          const h = Math.max(b.val * escala, b.val > 0 ? 3 : 0);
-                          return (
-                            <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", zIndex: 1, height: "100%" }}>
-                              
-                              <div style={{ position: "absolute", bottom: b.base * escala, left: "10%", right: "10%", height: h, background: b.color, borderRadius: 2 }}>
-                                {/* Línea punteada conectora desde el extremo superior derecho */}
-                                {tieneSiguiente && (
-                                  <div style={{ 
-                                    position: "absolute", 
-                                    top: 0,
-                                    left: "100%", 
-                                    width: "100%", // Asumiendo distribución uniforme
-                                    borderTop: `1px dashed ${GRAY_500}`, 
-                                    zIndex: -1 
-                                  }} />
-                                )}
-                              </div>
-                              
-                              {/* Textos elevados dinámicamente para no cortarse */}
-                              <div style={{ position: "absolute", bottom: (b.base * escala) + h + 6, left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: GRAY_900 }}>
-                                {pct(b.val)}%<br />{b.val}
-                              </div>
-                              
-                              <div style={{ position: "absolute", top: ALTO_PX + 10, left: 0, right: 0, fontSize: 10, color: GRAY_500, textAlign: "center", lineHeight: 1.2, padding: "0 4px" }}>
-                                {b.label}
-                              </div>
+                        {/* Conectores punteados:
+                            - Barra "Total" (i=0): conecta desde su esquina SUPERIOR derecha hasta la
+                              esquina SUPERIOR izquierda de la siguiente (ambas al tope del total).
+                            - Barras "resta" (i>0): conectan desde su esquina INFERIOR derecha hasta la
+                              esquina SUPERIOR izquierda de la siguiente (donde la siguiente cuelga). */}
+                        {barras.slice(0, -1).map((b, i) => b.landing === null ? null : (
+                          <div key={`conn-${i}`} style={{
+                            position: "absolute", bottom: b.landing * escala,
+                            left: `calc(${(i + 1) * colPct}% - ${margenPct}%)`,
+                            width: `${margenPct * 2}%`,
+                            borderTop: `1.5px dotted ${GRAY_500}`,
+                          }} />
+                        ))}
+
+                        {/* Barras */}
+                        {barras.map((b, i) => (
+                          <div key={b.label} title={`${b.label}: ${pct(b.val)}% — ${b.val} tickets`} style={{
+                            position: "absolute",
+                            left: `calc(${i * colPct}% + ${margenPct}%)`,
+                            width: `${colPct - margenPct * 2}%`,
+                            bottom: b.base * escala,
+                            height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
+                            background: b.color, borderRadius: 3,
+                          }}>
+                            <div style={{ position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+                              {pct(b.val)}%<br />{b.val} tickets
                             </div>
-                          );
-                        })}
+                          </div>
+                        ))}
                       </div>
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const barrasLabels = ["Total tickets", "No validados", "No realizados", "Pend. subir", "Pend. validar", "Listos migrar"];
+                  return (
+                    <div style={{ display: "flex", marginLeft: 32 }}>
+                      {barrasLabels.map(l => (
+                        <div key={l} style={{ flex: 1, fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 8, lineHeight: 1.3 }}>{l}</div>
+                      ))}
                     </div>
                   );
                 })()}
