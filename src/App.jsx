@@ -411,7 +411,7 @@ export default function App() {
     const p2 = esMoto ? 2 : 3;
     const seg1 = limpio.slice(0, p1);
     const seg2 = limpio.slice(p1, p1 + p2);
-    return seg2 ? `${seg1}-${seg2}` : seg1;
+    return limpio.length >= p1 ? `${seg1}-${seg2}` : seg1;
   }
 
   // Al abrir un ticket ya existente, se deduce si es moto con solo mirar el largo del primer
@@ -1041,6 +1041,9 @@ export default function App() {
                     {colsVisibles.map(c => {
                       const editable = !isAdmin && (c.key === "placa" || c.key === "rutas");
                       let content = v[c.key];
+                      const CAMPOS_CONSOLIDADOS = ["rutas", "placa", "texto_detectado_ia", "estado_validacion_ia"];
+                      const esConsolidado = CAMPOS_CONSOLIDADOS.includes(c.key);
+
                       if (c.key === "estado_final") {
                         const ef = v.estado_final;
                         const bg = ef === "FINALIZADO" ? GREEN_LIGHT : ef === "PENDIENTE" ? AMBER_LIGHT : ef === "OBSERVADO" ? RED_LIGHT : GRAY_100;
@@ -1053,15 +1056,20 @@ export default function App() {
                           ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (["rutas","placa","texto_detectado_ia"].includes(c.key)) {
-                        // Consolida documento 1/2/3 en una sola celda con " | " -- la data real
-                        // sigue separada en columnas propias (rutas_2/placa_2/etc), esto es solo visual.
-                        const cons = [v[c.key], v[`${c.key}_2`], v[`${c.key}_3`]].filter(Boolean).join(" | ");
-                        content = cons || <span style={{ color: GRAY_200 }}>—</span>;
+                        // Documento 1/2/3 en líneas separadas dentro de la misma celda -- la data real
+                        // sigue viviendo en columnas propias (rutas_2/placa_2/etc), esto es solo visual.
+                        const partes = [v[c.key], v[`${c.key}_2`], v[`${c.key}_3`]].filter(Boolean);
+                        content = partes.length
+                          ? <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "2px 0" }}>
+                              {partes.map((p, i) => <span key={i} style={i === 0 ? { fontFamily: c.mono ? "monospace" : "inherit" } : { fontSize: 10, color: GRAY_500, fontFamily: c.mono ? "monospace" : "inherit" }}>{p}</span>)}
+                            </div>
+                          : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "estado_validacion_ia") {
-                        const cons = [v.estado_validacion_ia, v.estado_validacion_ia_2, v.estado_validacion_ia_3]
-                          .filter(Boolean).map(s => String(s).toUpperCase()).join(" | ");
-                        content = cons
-                          ? <span style={{ fontSize: 11, color: GRAY_900 }}>{cons}</span>
+                        const partes = [v.estado_validacion_ia, v.estado_validacion_ia_2, v.estado_validacion_ia_3].filter(Boolean).map(s => String(s).toUpperCase());
+                        content = partes.length
+                          ? <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "2px 0" }}>
+                              {partes.map((p, i) => <span key={i} style={i === 0 ? { fontSize: 11, color: GRAY_900 } : { fontSize: 10, color: GRAY_500 }}>{p}</span>)}
+                            </div>
                           : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
                         content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
@@ -1073,14 +1081,13 @@ export default function App() {
                       } else if (content === null || content === undefined || content === "") {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
-                      const CAMPOS_CONSOLIDADOS = ["rutas", "placa", "texto_detectado_ia", "estado_validacion_ia"];
-                      const tituloCelda = CAMPOS_CONSOLIDADOS.includes(c.key)
+                      const tituloCelda = esConsolidado
                         ? [v[c.key], v[`${c.key}_2`], v[`${c.key}_3`]].filter(Boolean).join(" | ") || undefined
                         : (v[c.key] !== null && v[c.key] !== undefined && v[c.key] !== "") ? String(v[c.key]) : undefined;
                       return (
                         <td key={c.key} title={tituloCelda}
                           data-editable={editable ? "1" : undefined}
-                          style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
+                          style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: esConsolidado ? "visible" : "hidden", textOverflow: esConsolidado ? "clip" : "ellipsis", whiteSpace: esConsolidado ? "normal" : "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
                           {content}
                         </td>
                       );
