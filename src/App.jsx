@@ -62,6 +62,27 @@ const COLS_TRANSPORTISTA_DETALLE = [
   "detalle_servicio", "realizado", "estado_doc", "fecha_entrega_doc",
 ];
 
+// Ordena una lista de viajes por cualquier columna de COLS -- numérica si la columna
+// está marcada como "right" (cantidad, importe, match_ia), alfabética/fecha en el resto
+// (fecha_carga ordena bien como texto porque ya viene en formato ISO "AAAA-MM-DD").
+function ordenarViajes(lista, col, dir) {
+  if (!col) return lista;
+  const colDef = COLS.find(c => c.key === col);
+  const esNumerico = !!colDef?.right;
+  const copia = [...lista];
+  copia.sort((a, b) => {
+    let av = a[col], bv = b[col];
+    if (esNumerico) {
+      av = Number(av) || 0; bv = Number(bv) || 0;
+      return dir === "desc" ? bv - av : av - bv;
+    }
+    av = av === null || av === undefined ? "" : String(av);
+    bv = bv === null || bv === undefined ? "" : String(bv);
+    return dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv);
+  });
+  return copia;
+}
+
 function extraerNroSpotCorto(nroSpot) {
   if (!nroSpot) return "doc";
   const m = String(nroSpot).match(/(Nro\d+)/i);
@@ -264,6 +285,8 @@ export default function App() {
   const [dashLoading, setDashLoading] = useState(false);
   const [cascadaDetalleModal, setCascadaDetalleModal] = useState(null);
   const [rankingSortCol, setRankingSortCol] = useState(null);
+  const [tablaSortCol, setTablaSortCol] = useState(null);
+  const [tablaSortDir, setTablaSortDir] = useState("asc");
   const [rankingSortDir, setRankingSortDir] = useState("desc");
   
   const [pwModalOpen,  setPwModalOpen]  = useState(false);
@@ -1017,11 +1040,14 @@ export default function App() {
             <thead>
               <tr>
                 {colsVisibles.map(c => (
-                  <th key={c.key} style={{ padding: "8px 11px", textAlign: c.right ? "right" : "left", fontSize: 10, fontWeight: 500,
+                  <th key={c.key} onClick={() => {
+                    if (tablaSortCol === c.key) setTablaSortDir(d => d === "asc" ? "desc" : "asc");
+                    else { setTablaSortCol(c.key); setTablaSortDir("asc"); }
+                  }} style={{ padding: "8px 11px", textAlign: c.right ? "right" : "left", fontSize: 10, fontWeight: 500,
                     color: c.headerGroup === "ia" ? BLUE : c.headerGroup === "transportista" ? AMBER : GRAY_500,
                     background: c.headerGroup === "ia" ? "#EEF4FC" : c.headerGroup === "transportista" ? "#FFF8EC" : GRAY_50,
-                    borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", position: "sticky", top: 0, zIndex: 3, textTransform: "uppercase", letterSpacing: ".03em" }}>
-                    {c.label}
+                    borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", position: "sticky", top: 0, zIndex: 3, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer", userSelect: "none" }}>
+                    {c.label} {tablaSortCol === c.key && (tablaSortDir === "desc" ? "▼" : "▲")}
                   </th>
                 ))}
                 {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 200, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Detalle</th>}
@@ -1033,7 +1059,7 @@ export default function App() {
             <tbody>
               {viajes.length === 0 ? (
                 <tr><td colSpan={colsVisibles.length + (isAdmin ? 2 : 4)} style={{ padding: 40, textAlign: "center", color: GRAY_500 }}>No hay registros para el rango seleccionado</td></tr>
-              ) : viajes.map(v => {
+              ) : ordenarViajes(viajes, tablaSortCol, tablaSortDir).map(v => {
                 const completo = (v.foto_versiones?.length || 0) > 0;
 
                 return (
