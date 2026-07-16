@@ -279,6 +279,7 @@ export default function App() {
   const [editPlaca3,   setEditPlaca3]   = useState("");
   const [editRuta3Input,setEditRuta3Input]= useState("");
   const [editDocsVisibles, setEditDocsVisibles] = useState(1);
+  const [tipoVehiculo, setTipoVehiculo] = useState({ 1: false, 2: false, 3: false }); // false=camión (3-3), true=moto (4-2)
   const [editSaving,   setEditSaving]   = useState(false);
   const [editErr,      setEditErr]      = useState("");
   // Estado de subida por documento: uploadState[1|2|3] = {file, err, uploading, validando, resultado, success}
@@ -395,10 +396,30 @@ export default function App() {
     setEditPlaca3(viaje.placa_3 || "");
     setEditRuta3Input(viaje.rutas_3 || "");
     setEditDocsVisibles(viaje.placa_3 ? 3 : viaje.placa_2 ? 2 : 1);
+    setTipoVehiculo({ 1: inferirMoto(viaje.placa), 2: inferirMoto(viaje.placa_2), 3: inferirMoto(viaje.placa_3) });
     setEditErr("");
   }
 
-  const PLACA_RE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
+  // Acepta 3-3 (camión, formato estándar para todos) o 4-2 (moto, solo aplica hoy para MUNDO)
+  const PLACA_RE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$|^[A-Za-z0-9]{4}-[A-Za-z0-9]{2}$/;
+
+  // Va insertando el guión solo mientras el usuario escribe -- sin importar si el carácter es
+  // letra o número, solo importa la posición. esMoto cambia el punto de corte (4 en vez de 3).
+  function formatearPlaca(valor, esMoto) {
+    const limpio = valor.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const p1 = esMoto ? 4 : 3;
+    const p2 = esMoto ? 2 : 3;
+    const seg1 = limpio.slice(0, p1);
+    const seg2 = limpio.slice(p1, p1 + p2);
+    return seg2 ? `${seg1}-${seg2}` : seg1;
+  }
+
+  // Al abrir un ticket ya existente, se deduce si es moto con solo mirar el largo del primer
+  // segmento de la placa guardada (4 caracteres = moto) -- no hace falta guardar esto en la BD.
+  function inferirMoto(placa) {
+    if (!placa) return false;
+    return (placa.split("-")[0] || "").length === 4;
+  }
 
   async function saveEdit() {
     if (editPlaca && !PLACA_RE.test(editPlaca)) { setEditErr("Formato inválido en Placa 1. Usa ABC-123."); return; }
@@ -505,15 +526,29 @@ export default function App() {
   function exportarExcel() {
     if (!viajes.length) return;
     const colsExp = COLS.filter(c => !c.adminOnly || isAdmin);
-    const headers = colsExp.map(c => c.label);
-    const rows = viajes.map(v => colsExp.map(c => {
+
+    // En la tabla, N°GR/Placa/Texto Detectado IA/Validación IA se ven consolidados con " | "
+    // cuando el ticket tiene varios documentos -- pero en el Excel cada uno debe quedar en
+    // su propia columna, para no perder el detalle exacto de cada guía.
+    const CAMPOS_MULTIDOC = ["rutas", "placa", "texto_detectado_ia", "estado_validacion_ia"];
+    const columnasFinal = [];
+    colsExp.forEach(c => {
+      columnasFinal.push(c);
+      if (CAMPOS_MULTIDOC.includes(c.key)) {
+        columnasFinal.push({ key: `${c.key}_2`, label: `${c.label} 2` });
+        columnasFinal.push({ key: `${c.key}_3`, label: `${c.label} 3` });
+      }
+    });
+
+    const headers = columnasFinal.map(c => c.label);
+    const rows = viajes.map(v => columnasFinal.map(c => {
       const val = v[c.key];
       if (val === null || val === undefined) return "";
       if (c.key === "fecha_carga")
         return fmtFechaSolo(val);
       if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc")
         return fmtFecha(val);
-      if (c.key === "realizado" || c.key === "estado_final" || c.key === "estado_procesamiento_ia" || c.key === "estado_validacion_ia")
+      if (["realizado", "estado_final", "estado_procesamiento_ia", "estado_validacion_ia", "estado_validacion_ia_2", "estado_validacion_ia_3"].includes(c.key))
         return val ? String(val).toUpperCase() : "";
       if (c.key === "foto_versiones") return Array.isArray(val) ? val.length : 0;
       return String(val);
@@ -938,14 +973,6 @@ export default function App() {
                 <input value={dPlaca} onChange={e => setDPlaca(e.target.value.toUpperCase())} maxLength={7} style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }} />
               </div>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Estado doc</div>
-                <select value={dEstadoDoc} onChange={e => setDEstadoDoc(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
-                  <option value="">Todos</option>
-                  <option value="Completo">Completo</option>
-                  <option value="Pendiente">Pendiente</option>
-                </select>
-              </div>
-              <div>
                 <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 }}>Estado de Viaje Final</div>
                 <select value={dEstFinal} onChange={e => setDEstFinal(e.target.value)} style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
                   <option value="">Todos</option>
@@ -1021,9 +1048,20 @@ export default function App() {
                         content = ef
                           ? <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{ef}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (["realizado","estado_doc","estado_procesamiento_ia","estado_validacion_ia"].includes(c.key)) {
+                      } else if (["realizado","estado_doc","estado_procesamiento_ia"].includes(c.key)) {
                         content = v[c.key]
                           ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
+                          : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (["rutas","placa","texto_detectado_ia"].includes(c.key)) {
+                        // Consolida documento 1/2/3 en una sola celda con " | " -- la data real
+                        // sigue separada en columnas propias (rutas_2/placa_2/etc), esto es solo visual.
+                        const cons = [v[c.key], v[`${c.key}_2`], v[`${c.key}_3`]].filter(Boolean).join(" | ");
+                        content = cons || <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (c.key === "estado_validacion_ia") {
+                        const cons = [v.estado_validacion_ia, v.estado_validacion_ia_2, v.estado_validacion_ia_3]
+                          .filter(Boolean).map(s => String(s).toUpperCase()).join(" | ");
+                        content = cons
+                          ? <span style={{ fontSize: 11, color: GRAY_900 }}>{cons}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
                         content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
@@ -1035,8 +1073,12 @@ export default function App() {
                       } else if (content === null || content === undefined || content === "") {
                         content = <span style={{ color: GRAY_200 }}>—</span>;
                       }
+                      const CAMPOS_CONSOLIDADOS = ["rutas", "placa", "texto_detectado_ia", "estado_validacion_ia"];
+                      const tituloCelda = CAMPOS_CONSOLIDADOS.includes(c.key)
+                        ? [v[c.key], v[`${c.key}_2`], v[`${c.key}_3`]].filter(Boolean).join(" | ") || undefined
+                        : (v[c.key] !== null && v[c.key] !== undefined && v[c.key] !== "") ? String(v[c.key]) : undefined;
                       return (
-                        <td key={c.key} title={(v[c.key] !== null && v[c.key] !== undefined && v[c.key] !== "") ? String(v[c.key]) : undefined}
+                        <td key={c.key} title={tituloCelda}
                           data-editable={editable ? "1" : undefined}
                           style={{ padding: "8px 11px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: c.mono ? "monospace" : "inherit", fontSize: c.mono ? 10 : 11, textAlign: c.right ? "right" : "left", color: c.muted ? GRAY_500 : GRAY_900 }}>
                           {content}
@@ -1407,7 +1449,9 @@ export default function App() {
                       <tr key={fila.nro_spot}>
                         {COLS.map(c => {
                           let val = fila[c.key];
-                          if (c.key === "fecha_carga") val = val ? fmtFechaSolo(val) : "—";
+                          if (["rutas", "placa", "texto_detectado_ia", "estado_validacion_ia"].includes(c.key)) {
+                            val = [fila[c.key], fila[`${c.key}_2`], fila[`${c.key}_3`]].filter(Boolean).join(" | ") || "—";
+                          } else if (c.key === "fecha_carga") val = val ? fmtFechaSolo(val) : "—";
                           else if (val === null || val === undefined || val === "") val = "—";
                           return (
                             <td key={c.key} style={{ padding: "7px 9px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: val === "—" ? GRAY_200 : GRAY_900, fontFamily: c.mono ? "monospace" : "inherit" }}>{String(val)}</td>
@@ -1515,8 +1559,22 @@ export default function App() {
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{editModal.nro_spot}</div>
             <div style={{ fontSize: 10, fontWeight: 600, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Guía 1</div>
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
-              <input value={editPlaca} onChange={e => { setEditPlaca(e.target.value.toUpperCase()); setEditErr(""); }}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
+                {editModal.proveedor === "MUNDO" && (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button type="button" onClick={() => setTipoVehiculo(prev => ({ ...prev, 1: false }))} title="Camión (3-3)"
+                      style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${!tipoVehiculo[1] ? RED : BORDER}`, background: !tipoVehiculo[1] ? RED_LIGHT : "white", color: !tipoVehiculo[1] ? RED_DARK : GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="13" height="9"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+                    </button>
+                    <button type="button" onClick={() => setTipoVehiculo(prev => ({ ...prev, 1: true }))} title="Moto (4-2)"
+                      style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${tipoVehiculo[1] ? RED : BORDER}`, background: tipoVehiculo[1] ? RED_LIGHT : "white", color: tipoVehiculo[1] ? RED_DARK : GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h5l3-6h3M13 11l-2-4H8"/></svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+              <input value={editPlaca} onChange={e => { setEditPlaca(formatearPlaca(e.target.value, tipoVehiculo[1])); setEditErr(""); }}
                 maxLength={7}
                 style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
             </div>
@@ -1536,8 +1594,22 @@ export default function App() {
                   )}
                 </div>
                 <div style={{ marginBottom: 18 }}>
-                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
-                  <input value={editPlaca2} onChange={e => { setEditPlaca2(e.target.value.toUpperCase()); setEditErr(""); }}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
+                    {editModal.proveedor === "MUNDO" && (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button type="button" onClick={() => setTipoVehiculo(prev => ({ ...prev, 2: false }))} title="Camión (3-3)"
+                          style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${!tipoVehiculo[2] ? RED : BORDER}`, background: !tipoVehiculo[2] ? RED_LIGHT : "white", color: !tipoVehiculo[2] ? RED_DARK : GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="13" height="9"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+                        </button>
+                        <button type="button" onClick={() => setTipoVehiculo(prev => ({ ...prev, 2: true }))} title="Moto (4-2)"
+                          style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${tipoVehiculo[2] ? RED : BORDER}`, background: tipoVehiculo[2] ? RED_LIGHT : "white", color: tipoVehiculo[2] ? RED_DARK : GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h5l3-6h3M13 11l-2-4H8"/></svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <input value={editPlaca2} onChange={e => { setEditPlaca2(formatearPlaca(e.target.value, tipoVehiculo[2])); setEditErr(""); }}
                     maxLength={7}
                     style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
                 </div>
@@ -1557,8 +1629,22 @@ export default function App() {
                     style={{ background: "none", border: "none", color: RED_DARK, fontSize: 10, cursor: "pointer" }}>Quitar</button>
                 </div>
                 <div style={{ marginBottom: 18 }}>
-                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
-                  <input value={editPlaca3} onChange={e => { setEditPlaca3(e.target.value.toUpperCase()); setEditErr(""); }}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em" }}>N° Placa</div>
+                    {editModal.proveedor === "MUNDO" && (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button type="button" onClick={() => setTipoVehiculo(prev => ({ ...prev, 3: false }))} title="Camión (3-3)"
+                          style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${!tipoVehiculo[3] ? RED : BORDER}`, background: !tipoVehiculo[3] ? RED_LIGHT : "white", color: !tipoVehiculo[3] ? RED_DARK : GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="13" height="9"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+                        </button>
+                        <button type="button" onClick={() => setTipoVehiculo(prev => ({ ...prev, 3: true }))} title="Moto (4-2)"
+                          style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${tipoVehiculo[3] ? RED : BORDER}`, background: tipoVehiculo[3] ? RED_LIGHT : "white", color: tipoVehiculo[3] ? RED_DARK : GRAY_500, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h5l3-6h3M13 11l-2-4H8"/></svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <input value={editPlaca3} onChange={e => { setEditPlaca3(formatearPlaca(e.target.value, tipoVehiculo[3])); setEditErr(""); }}
                     maxLength={7}
                     style={{ ...inp, width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 13, letterSpacing: ".08em", background: "#FFFBF0", border: `1px solid ${BORDER}` }} />
                 </div>
