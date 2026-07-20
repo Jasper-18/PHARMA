@@ -25,6 +25,8 @@ const MAX_MB = 10;
 
 // Orden de columnas según diseño acordado
 const COLS = [
+  { key: "fecha_registro",      label: "Fecha Registro",           width: 118, adminOnly: true },
+  { key: "solicitante",         label: "Solicitante",              width: 160, trunc: true, adminOnly: true },
   { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
@@ -567,7 +569,7 @@ export default function App() {
     const rows = viajes.map(v => columnasFinal.map(c => {
       const val = v[c.key];
       if (val === null || val === undefined) return "";
-      if (c.key === "fecha_carga")
+      if (c.key === "fecha_carga" || c.key === "fecha_registro")
         return fmtFechaSolo(val);
       if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc")
         return fmtFecha(val);
@@ -827,6 +829,93 @@ export default function App() {
     setDashProveedor(""); 
     setDashDesde(""); 
     setDashHasta(D1_STR);
+  }
+
+  // Misma lógica del script de Python (clasificar_negocio_ceco). Orden de
+  // prioridad: primero los 3 CD específicos; luego otras CTs/HUBs (cd_origen
+  // empieza con "HUB" o "CT"); luego local a local (si aparece MF, INK o
+  // LOCAL en cualquier parte de origen o destino); y por defecto, si nada
+  // de lo anterior calza, cae en "otras CTs o HUBs".
+  function clasificarNegocioCeco(origen, destino) {
+    const origenNorm = String(origen || "").trim();
+    const destinoNorm = String(destino || "").trim();
+    const origenUp = origenNorm.toUpperCase();
+
+    if (origenUp === "CD SANTA ANITA") return { negocio: "FPM", ceco: "UB82100001" };
+    if (origenUp === "CD SUIZO") return { negocio: "QSC", ceco: "AB00000001" };
+    if (origenUp === "CD PUNTA NEGRA") return { negocio: "FAPE", ceco: "TITAN" };
+    if (/^(HUB|CT)\b/i.test(origenUp)) return { negocio: "FAPE", ceco: "1300704" };
+
+    const patronLocal = /\b(MF|INK|LOCAL)/i;
+    if (patronLocal.test(origenNorm) || patronLocal.test(destinoNorm)) return { negocio: "FAPE", ceco: "1301417" };
+
+    return { negocio: "FAPE", ceco: "1300704" };
+  }
+
+  // Exporta los tickets Realizado=SI + Estado Final=FINALIZADO, respetando los
+  // filtros actuales del dashboard (proveedor/fecha) -- mismo formato/columnas
+  // que el script de Python (13 columnas, Negocio/CECO calculados, orden por
+  // fecha ascendente, fecha con formato real de Excel, anchos ajustados).
+  async function exportarGeneralFinalizados() {
+    setDashLoading(true);
+    try {
+      let q = supabase.from("viajes").select("*")
+        .eq("realizado", "SI").eq("estado_final", "FINALIZADO")
+        .order("fecha_carga", { ascending: true });
+      if (dashProveedor) q = q.eq("proveedor", dashProveedor);
+      if (dashDesde) q = q.gte("fecha_carga", dashDesde);
+      if (dashHasta) q = q.lte("fecha_carga", dashHasta);
+      const { data, error } = await q;
+      if (error) throw error;
+      if (!data || data.length === 0) { alert("No hay tickets Finalizados para el rango filtrado."); return; }
+
+      const filas = data.map(v => {
+        const { negocio, ceco } = clasificarNegocioCeco(v.cd_origen, v.cd_destino);
+        let fechaObj = null;
+        if (v.fecha_carga) {
+          const [y, m, d] = v.fecha_carga.split("-").map(Number);
+          fechaObj = new Date(y, m - 1, d); // fecha local pura, sin corrimiento UTC
+        }
+        return {
+          "Fecha Servicio": fechaObj,
+          "Proveedor": v.proveedor || "",
+          "Tipo de Traslado": "SPOT",
+          "Origen": v.cd_origen || "",
+          "Destino": v.cd_destino || "",
+          "N° Placa": v.placa || "",
+          "Cantidad": v.cantidad || "",
+          "N° GR": v.rutas || "",
+          "N° SPOT": v.nro_spot || "",
+          "Detalle del Servicio": v.detalle_servicio || "",
+          "Importe": v.importe || "",
+          "Centro de Costo": ceco,
+          "Negocio": negocio,
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(filas, { cellDates: true });
+      const headers = Object.keys(filas[0]);
+      ws["!cols"] = headers.map(h => {
+        const maxLen = Math.max(h.length, ...filas.map(f => String(f[h] ?? "").length));
+        return { wch: maxLen + 3 };
+      });
+      const colFecha = headers.indexOf("Fecha Servicio");
+      const rango = XLSX.utils.decode_range(ws["!ref"]);
+      for (let r = 1; r <= rango.e.r; r++) {
+        const addr = XLSX.utils.encode_cell({ r, c: colFecha });
+        if (ws[addr]) ws[addr].z = "dd/mm/yyyy";
+      }
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Resumen");
+      const hoy = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      XLSX.writeFile(wb, `PharmaSPOT_Finalizados_${hoy}.xlsx`, { cellDates: true });
+    } catch (err) {
+      console.error(err);
+      alert("Error al exportar: " + err.message);
+    } finally {
+      setDashLoading(false);
+    }
   }
 
   const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal || fProveedor;
@@ -1099,7 +1188,7 @@ export default function App() {
                           : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "fecha_modif" || c.key === "fecha_entrega_doc") {
                         content = v[c.key] ? fmtFechaHora(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (c.key === "fecha_carga") {
+                      } else if (c.key === "fecha_carga" || c.key === "fecha_registro") {
                         content = v[c.key] ? fmtFechaSolo(v[c.key]) : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (c.key === "hora_cita") {
                         const m = v[c.key] ? String(v[c.key]).match(/(\d{1,2}:\d{2})/) : null;
@@ -1224,6 +1313,15 @@ export default function App() {
             </button>
             <button onClick={() => fetchDashboard()} title="Actualizar"
               style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16 }}>↻</button>
+            <button onClick={exportarGeneralFinalizados} title="Exporta los tickets Finalizados del rango filtrado"
+              style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${RED}`, background: RED, color: "white", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Exportar
+            </button>
             {dashLoading && <span style={{ fontSize: 11, color: GRAY_500 }}>Actualizando…</span>}
           </div>
 
