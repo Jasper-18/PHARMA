@@ -24,6 +24,16 @@ const BORDER = "#e5e2db";
 const MAX_MB = 10;
 
 // Orden de columnas según diseño acordado
+// Motivos estándar de validación manual -- se guardan en motivo_validacion,
+// y alimentan el gráfico de barras del Panel Técnico. Se puede ampliar esta
+// lista más adelante sin romper lo ya registrado (los valores viejos siguen
+// contando igual en el gráfico, con su propio nombre).
+const MOTIVOS_VALIDACION = [
+  "N° GR mal digitado",
+  "Foto poco legible",
+  "Error mismo de la IA",
+];
+
 const COLS = [
   { key: "fecha_registro",      label: "Fecha Registro",           width: 118, adminOnly: true },
   { key: "solicitante",         label: "Solicitante",              width: 160, trunc: true, adminOnly: true },
@@ -281,6 +291,13 @@ export default function App() {
   const [dashDesde, setDashDesde] = useState("");
   const [dashHasta, setDashHasta] = useState(D1_STR);
   const [dashFiltroAbierto, setDashFiltroAbierto] = useState(false);
+  const [tecDesde, setTecDesde] = useState("");
+  const [tecHasta, setTecHasta] = useState(D1_STR);
+  const [tecFiltroAbierto, setTecFiltroAbierto] = useState(false);
+  const [kpisTecnico, setKpisTecnico] = useState(null);
+  const [motivosTecnico, setMotivosTecnico] = useState([]);
+  const [horasTecnico, setHorasTecnico] = useState([]);
+  const [tecLoading, setTecLoading] = useState(false);
 
   const [kpis, setKpis] = useState(null);
   const [ranking, setRanking] = useState([]);
@@ -313,6 +330,7 @@ export default function App() {
   const [validModal,   setValidModal]   = useState(null);
   const [validSaving,  setValidSaving]  = useState(false);
   const [validErr,     setValidErr]     = useState("");
+  const [motivoValidacion, setMotivoValidacion] = useState("");
 
   const fileRef1   = useRef();
   const fileRef2   = useRef();
@@ -740,13 +758,14 @@ export default function App() {
 
   async function handleValidarManual() {
     if (!validModal) return;
+    if (!motivoValidacion) { setValidErr("Selecciona un motivo antes de validar."); return; }
     setValidSaving(true); setValidErr("");
     try {
       const ahora = new Date().toISOString();
       // Marca MANUAL en TODOS los documentos que este ticket tenga declarados (no solo el 1) --
       // el trigger de la base de datos es quien decide estado_final según si ya todos quedaron OK,
       // así este botón no puede finalizar un ticket con un 2do/3er documento aún pendiente.
-      const payload = { estado_validacion_ia: "MANUAL", usuario_modif: session.user.email, fecha_modif: ahora };
+      const payload = { estado_validacion_ia: "MANUAL", usuario_modif: session.user.email, fecha_modif: ahora, motivo_validacion: motivoValidacion };
       if (validModal.placa_2) payload.estado_validacion_ia_2 = "MANUAL";
       if (validModal.placa_3) payload.estado_validacion_ia_3 = "MANUAL";
 
@@ -789,6 +808,40 @@ export default function App() {
       setDashLoading(false);
     }
   }, [isAdmin, dashProveedor, dashDesde, dashHasta]);
+
+  const fetchTecnico = useCallback(async () => {
+    if (!isAdmin) return;
+    setTecLoading(true);
+    try {
+      const [{ data: kData, error: kErr }, { data: mData, error: mErr }, { data: hData, error: hErr }] = await Promise.all([
+        supabase.rpc("dashboard_tecnico_kpis", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
+        supabase.rpc("dashboard_tecnico_motivos", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
+        supabase.rpc("dashboard_tecnico_horas", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
+      ]);
+      if (kErr) throw kErr;
+      if (mErr) throw mErr;
+      if (hErr) throw hErr;
+      setKpisTecnico(kData?.[0] || null);
+      setMotivosTecnico(mData || []);
+      setHorasTecnico(hData || []);
+    } catch (err) {
+      console.error("Error cargando panel técnico:", err);
+    } finally {
+      setTecLoading(false);
+    }
+  }, [isAdmin, tecDesde, tecHasta]);
+
+  useEffect(() => {
+    if (vista !== "tecnico" || !isAdmin) return;
+    fetchTecnico();
+    const intervalo = setInterval(() => fetchTecnico(), 30000);
+    return () => clearInterval(intervalo);
+  }, [vista, isAdmin, tecDesde, tecHasta]);
+
+  function limpiarFiltrosTecnico() {
+    setTecDesde("");
+    setTecHasta(D1_STR);
+  }
 
   // Condiciones de cada bloque de la cascada, para el detalle por clic (todos menos "Total")
   const CASCADA_CONDICIONES = {
@@ -1002,13 +1055,21 @@ export default function App() {
               Seguimiento Adicionales
             </button>
             <button onClick={() => setVista("dashboard")}
-              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard" ? RED_LIGHT : "transparent", color: vista === "dashboard" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard" ? 600 : 500, cursor: "pointer", textAlign: "left" }}>
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard" ? RED_LIGHT : "transparent", color: vista === "dashboard" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <line x1="18" y1="20" x2="18" y2="10"></line>
                 <line x1="12" y1="20" x2="12" y2="4"></line>
                 <line x1="6" y1="20" x2="6" y2="14"></line>
               </svg> 
               Dashboard
+            </button>
+            <button onClick={() => setVista("tecnico")}
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "tecnico" ? RED_LIGHT : "transparent", color: vista === "tecnico" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "tecnico" ? 600 : 500, cursor: "pointer", textAlign: "left" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg> 
+              Panel Técnico
             </button>
           </div>
         )}
@@ -1228,7 +1289,7 @@ export default function App() {
                         </button>
                       )}
                       {isAdmin && v.realizado === "SI" && v.estado_final !== "FINALIZADO" && (
-                        <button onClick={() => { setValidModal(v); setValidErr(""); }} title="Aprobar adicional"
+                        <button onClick={() => { setValidModal(v); setValidErr(""); setMotivoValidacion(""); }} title="Aprobar adicional"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${BLUE}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={BLUE} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="20 6 9 17 4 12"/>
@@ -1542,6 +1603,125 @@ export default function App() {
         </div>
       )}
 
+      {/* PANEL TÉCNICO */}
+      {vista === "tecnico" && isAdmin && (
+        <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: GRAY_900, marginBottom: 4 }}>Panel Técnico</div>
+          <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18 }}>Salud del sistema y calidad de datos — no es el seguimiento operativo del día a día</div>
+
+          {/* Filtros */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 16, paddingBottom: 14, borderBottom: `0.5px solid ${BORDER}` }}>
+            <div style={{ position: "relative" }}>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Fecha de ejecución</div>
+              <button onClick={() => setTecFiltroAbierto(!tecFiltroAbierto)}
+                style={{ ...inp, width: 220, textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                {tecDesde && tecHasta ? `${fmtFechaSolo(tecDesde)} al ${fmtFechaSolo(tecHasta)}` : "Seleccionar fechas"}
+                <span style={{ fontSize: 9, transform: tecFiltroAbierto ? "rotate(180deg)" : "none" }}>▼</span>
+              </button>
+              {tecFiltroAbierto && (
+                <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 6, background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 10, padding: 12, zIndex: 50, boxShadow: "0 6px 20px rgba(0,0,0,0.12)" }}>
+                  <RangePicker desde={tecDesde} hasta={tecHasta} maxDias={90}
+                    onChange={({ desde, hasta }) => { setTecDesde(desde); setTecHasta(hasta); setTecFiltroAbierto(false); }} />
+                </div>
+              )}
+            </div>
+            <button onClick={limpiarFiltrosTecnico} style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 12 }}>
+              Limpiar filtros
+            </button>
+            <button onClick={() => fetchTecnico()} title="Actualizar"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16 }}>↻</button>
+            {tecLoading && <span style={{ fontSize: 11, color: GRAY_500 }}>Actualizando…</span>}
+          </div>
+
+          {kpisTecnico && (
+            <>
+              {/* Tarjetas KPI */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 26 }}>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Imágenes Escaneadas</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpisTecnico.total_escaneados}</div>
+                </div>
+                <div style={{ background: RED_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: RED_DARK, marginBottom: 6 }}>Intervenciones Manuales</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: RED_DARK }}>{kpisTecnico.intervenciones_manuales}</div>
+                </div>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Efectividad de IA</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpisTecnico.pct_efectividad_ia ?? 0}%</div>
+                    {(() => {
+                      const p = kpisTecnico.pct_efectividad_ia ?? 0;
+                      const c = p >= 90 ? GREEN : p >= 75 ? AMBER : RED_DARK;
+                      const bg = p >= 90 ? GREEN_LIGHT : p >= 75 ? AMBER_LIGHT : RED_LIGHT;
+                      return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p >= 90 ? "Buena" : p >= 75 ? "Regular" : "Baja"}</span>;
+                    })()}
+                  </div>
+                </div>
+                <div style={{ background: AMBER_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: AMBER, marginBottom: 6 }}>Importe Vacío/Cero</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: AMBER }}>{kpisTecnico.tickets_importe_vacio}</div>
+                </div>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo — A tiempo</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: GREEN }}>{kpisTecnico.tickets_a_tiempo}</div>
+                </div>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo — Fuera de Fecha</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: RED_DARK }}>{kpisTecnico.tickets_fuera_fecha}</div>
+                </div>
+              </div>
+
+              {/* Gráfico de barras horizontal — motivos de validación manual */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 12 }}>Motivos de Validación Manual</div>
+                {motivosTecnico.length === 0 ? (
+                  <div style={{ fontSize: 12, color: GRAY_500, padding: "16px 0" }}>Sin intervenciones manuales en el rango filtrado.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {(() => {
+                      const max = Math.max(...motivosTecnico.map(m => Number(m.cantidad)));
+                      return motivosTecnico.map(m => (
+                        <div key={m.motivo} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 170, fontSize: 11, color: GRAY_900, textAlign: "right", flexShrink: 0 }}>{m.motivo}</div>
+                          <div style={{ flex: 1, background: GRAY_100, borderRadius: 5, height: 20, position: "relative" }}>
+                            <div style={{ width: `${(Number(m.cantidad) / max) * 100}%`, height: "100%", background: RED, borderRadius: 5, minWidth: 3 }} />
+                          </div>
+                          <div style={{ width: 30, fontSize: 12, fontWeight: 600, color: GRAY_900 }}>{m.cantidad}</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Histograma — hora de validación de Realizado, franjas de 1 hora */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 12 }}>Horario de Validación de "Realizado"</div>
+                {horasTecnico.length === 0 ? (
+                  <div style={{ fontSize: 12, color: GRAY_500, padding: "16px 0" }}>Sin datos de validación en el rango filtrado.</div>
+                ) : (() => {
+                  const porHora = {};
+                  horasTecnico.forEach(h => { porHora[h.hora_inicio] = Number(h.cantidad); });
+                  const horas = Array.from({ length: 24 }, (_, h) => ({ hora: h, cantidad: porHora[h] || 0 }));
+                  const max = Math.max(...horas.map(h => h.cantidad), 1);
+                  const ALTO_PX = 130;
+                  return (
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: ALTO_PX + 22, overflowX: "auto", paddingBottom: 4 }}>
+                      {horas.map(h => (
+                        <div key={h.hora} title={`${h.hora}:00 - ${h.hora + 1}:00 — ${h.cantidad} validaciones`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, width: 20 }}>
+                          <div style={{ width: 14, height: Math.max((h.cantidad / max) * ALTO_PX, h.cantidad > 0 ? 3 : 0), background: h.cantidad > 0 ? BLUE : GRAY_100, borderRadius: 2 }} />
+                          <div style={{ fontSize: 8, color: GRAY_500, marginTop: 4 }}>{h.hora % 2 === 0 ? h.hora : ""}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
         </div>
       </div>
 
@@ -1825,6 +2005,14 @@ export default function App() {
                   <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{validModal.nro_spot}</span>?
                 </div>
               </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Motivo de la validación manual</div>
+              <select value={motivoValidacion} onChange={e => { setMotivoValidacion(e.target.value); setValidErr(""); }}
+                style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
+                <option value="">Selecciona un motivo...</option>
+                {MOTIVOS_VALIDACION.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
             </div>
             {validErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {validErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
