@@ -31,7 +31,7 @@ const MAX_MB = 10;
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
-  "Error mismo de la IA",
+  "Error de lectura de la IA",
 ];
 
 const COLS = [
