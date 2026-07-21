@@ -31,7 +31,7 @@ const MAX_MB = 10;
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
-  "Error de lectura de la IA",
+  "Error mismo de la IA",
 ];
 
 const COLS = [
@@ -871,6 +871,24 @@ export default function App() {
     }
   }
 
+  // Detalle por clic en una barra de "Motivos de Validación Manual" -- mismo patrón que la cascada
+  async function abrirDetalleMotivo(motivo) {
+    setCascadaDetalleModal({ categoria: motivo, cargando: true, filas: [] });
+    try {
+      let q = supabase.from("viajes").select("*").not("usuario_modif", "is", null)
+        .order("fecha_carga", { ascending: false }).limit(300);
+      q = motivo === "Sin motivo registrado" ? q.is("motivo_validacion", null) : q.eq("motivo_validacion", motivo);
+      if (tecDesde) q = q.gte("fecha_carga", tecDesde);
+      if (tecHasta) q = q.lte("fecha_carga", tecHasta);
+      const { data, error } = await q;
+      if (error) throw error;
+      setCascadaDetalleModal({ categoria: motivo, cargando: false, filas: data || [] });
+    } catch (err) {
+      console.error("Error cargando detalle de motivo:", err);
+      setCascadaDetalleModal({ categoria: motivo, cargando: false, filas: [], error: true });
+    }
+  }
+
   useEffect(() => {
     if (vista !== "dashboard" || !isAdmin) return;
     fetchDashboard();
@@ -1681,7 +1699,8 @@ export default function App() {
                     {(() => {
                       const max = Math.max(...motivosTecnico.map(m => Number(m.cantidad)));
                       return motivosTecnico.map(m => (
-                        <div key={m.motivo} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div key={m.motivo} onClick={() => abrirDetalleMotivo(m.motivo)} title="Clic para ver el detalle"
+                          style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                           <div style={{ width: 170, fontSize: 11, color: GRAY_900, textAlign: "right", flexShrink: 0 }}>{m.motivo}</div>
                           <div style={{ flex: 1, background: GRAY_100, borderRadius: 5, height: 20, position: "relative" }}>
                             <div style={{ width: `${(Number(m.cantidad) / max) * 100}%`, height: "100%", background: RED, borderRadius: 5, minWidth: 3 }} />
@@ -1705,14 +1724,21 @@ export default function App() {
                   const horas = Array.from({ length: 24 }, (_, h) => ({ hora: h, cantidad: porHora[h] || 0 }));
                   const max = Math.max(...horas.map(h => h.cantidad), 1);
                   const ALTO_PX = 130;
+                  const ETIQUETA_PX = 100; // alto reservado para la etiqueta vertical
                   return (
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: ALTO_PX + 22, overflowX: "auto", paddingBottom: 4 }}>
-                      {horas.map(h => (
-                        <div key={h.hora} title={`${h.hora}:00 - ${h.hora + 1}:00 — ${h.cantidad} validaciones`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, width: 20 }}>
-                          <div style={{ width: 14, height: Math.max((h.cantidad / max) * ALTO_PX, h.cantidad > 0 ? 3 : 0), background: h.cantidad > 0 ? BLUE : GRAY_100, borderRadius: 2 }} />
-                          <div style={{ fontSize: 8, color: GRAY_500, marginTop: 4 }}>{h.hora % 2 === 0 ? h.hora : ""}</div>
-                        </div>
-                      ))}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: ALTO_PX + ETIQUETA_PX + 8, overflowX: "auto", paddingBottom: 4 }}>
+                      {horas.map(h => {
+                        const hh = String(h.hora).padStart(2, "0");
+                        const rango = `${hh}:00 - ${hh}:59`;
+                        return (
+                          <div key={h.hora} title={`${rango} — ${h.cantidad} validaciones`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, width: 20 }}>
+                            <div style={{ width: 14, height: Math.max((h.cantidad / max) * ALTO_PX, h.cantidad > 0 ? 3 : 0), background: h.cantidad > 0 ? BLUE : GRAY_100, borderRadius: 2 }} />
+                            <div style={{ width: 20, display: "flex", justifyContent: "center", marginTop: 6 }}>
+                              <span style={{ fontSize: 8, color: GRAY_500, whiteSpace: "nowrap", writingMode: "vertical-rl", transform: "rotate(180deg)" }}>{rango}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
