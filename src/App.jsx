@@ -297,6 +297,7 @@ export default function App() {
   const [kpisTecnico, setKpisTecnico] = useState(null);
   const [motivosTecnico, setMotivosTecnico] = useState([]);
   const [horasTecnico, setHorasTecnico] = useState([]);
+  const [rankingIncumplimiento, setRankingIncumplimiento] = useState([]);
   const [tecLoading, setTecLoading] = useState(false);
 
   const [kpis, setKpis] = useState(null);
@@ -813,17 +814,20 @@ export default function App() {
     if (!isAdmin) return;
     setTecLoading(true);
     try {
-      const [{ data: kData, error: kErr }, { data: mData, error: mErr }, { data: hData, error: hErr }] = await Promise.all([
+      const [{ data: kData, error: kErr }, { data: mData, error: mErr }, { data: hData, error: hErr }, { data: rData, error: rErr }] = await Promise.all([
         supabase.rpc("dashboard_tecnico_kpis", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
         supabase.rpc("dashboard_tecnico_motivos", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
         supabase.rpc("dashboard_tecnico_horas", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
+        supabase.rpc("dashboard_tecnico_ranking_incumplimiento", { p_fecha_desde: tecDesde || null, p_fecha_hasta: tecHasta || null }),
       ]);
       if (kErr) throw kErr;
       if (mErr) throw mErr;
       if (hErr) throw hErr;
+      if (rErr) throw rErr;
       setKpisTecnico(kData?.[0] || null);
       setMotivosTecnico(mData || []);
       setHorasTecnico(hData || []);
+      setRankingIncumplimiento(rData || []);
     } catch (err) {
       console.error("Error cargando panel técnico:", err);
     } finally {
@@ -1680,6 +1684,21 @@ export default function App() {
                   <div style={{ fontSize: 24, fontWeight: 600, color: AMBER }}>{kpisTecnico.tickets_importe_vacio}</div>
                 </div>
                 <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Validado antes del corte</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{kpisTecnico.pct_validacion_a_tiempo ?? 0}%</div>
+                    {(() => {
+                      const p = kpisTecnico.pct_validacion_a_tiempo ?? 0;
+                      const c = p >= 90 ? GREEN : p >= 75 ? AMBER : RED_DARK;
+                      const bg = p >= 90 ? GREEN_LIGHT : p >= 75 ? AMBER_LIGHT : RED_LIGHT;
+                      return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p >= 90 ? "Buena" : p >= 75 ? "Regular" : "Baja"}</span>;
+                    })()}
+                  </div>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginTop: 4 }}>
+                    {kpisTecnico.tickets_validados_a_tiempo} a tiempo · {kpisTecnico.tickets_validados_tarde} tarde
+                  </div>
+                </div>
+                <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
                   <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Escaneo — A tiempo</div>
                   <div style={{ fontSize: 24, fontWeight: 600, color: GREEN }}>{kpisTecnico.tickets_a_tiempo}</div>
                 </div>
@@ -1713,16 +1732,31 @@ export default function App() {
                 )}
               </div>
 
-              {/* Histograma — hora de validación de Realizado, franjas de 1 hora */}
+              {/* Histograma — hora de validación de Realizado, apilado por cumplimiento del corte */}
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 12 }}>Horario de Validación de "Realizado"</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900 }}>Horario de Validación de "Realizado"</div>
+                  <div style={{ display: "flex", gap: 14, fontSize: 11, color: GRAY_500 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: GREEN, display: "inline-block" }} /> Antes del corte
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: RED, display: "inline-block" }} /> Después del corte
+                    </span>
+                  </div>
+                </div>
                 {horasTecnico.length === 0 ? (
                   <div style={{ fontSize: 12, color: GRAY_500, padding: "16px 0" }}>Sin datos de validación en el rango filtrado.</div>
                 ) : (() => {
                   const porHora = {};
-                  horasTecnico.forEach(h => { porHora[h.hora_inicio] = Number(h.cantidad); });
-                  const horas = Array.from({ length: 24 }, (_, h) => ({ hora: h, cantidad: porHora[h] || 0 }));
-                  const max = Math.max(...horas.map(h => h.cantidad), 1);
+                  horasTecnico.forEach(h => {
+                    porHora[h.hora_inicio] = { aTiempo: Number(h.cantidad_a_tiempo) || 0, tarde: Number(h.cantidad_tarde) || 0 };
+                  });
+                  const horas = Array.from({ length: 24 }, (_, h) => {
+                    const v = porHora[h] || { aTiempo: 0, tarde: 0 };
+                    return { hora: h, aTiempo: v.aTiempo, tarde: v.tarde, total: v.aTiempo + v.tarde };
+                  });
+                  const max = Math.max(...horas.map(h => h.total), 1);
                   const ALTO_PX = 130;
                   const ETIQUETA_PX = 100; // alto reservado para la etiqueta vertical
                   return (
@@ -1730,9 +1764,15 @@ export default function App() {
                       {horas.map(h => {
                         const hh = String(h.hora).padStart(2, "0");
                         const rango = `${hh}:00 - ${hh}:59`;
+                        const alturaTotal = Math.max((h.total / max) * ALTO_PX, h.total > 0 ? 3 : 0);
+                        const alturaTarde = h.total > 0 ? (h.tarde / h.total) * alturaTotal : 0;
+                        const alturaATiempo = alturaTotal - alturaTarde;
                         return (
-                          <div key={h.hora} title={`${rango} — ${h.cantidad} validaciones`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, width: 20 }}>
-                            <div style={{ width: 14, height: Math.max((h.cantidad / max) * ALTO_PX, h.cantidad > 0 ? 3 : 0), background: h.cantidad > 0 ? BLUE : GRAY_100, borderRadius: 2 }} />
+                          <div key={h.hora} title={`${rango} — ${h.aTiempo} a tiempo, ${h.tarde} tarde`} style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, width: 20 }}>
+                            <div style={{ width: 14, display: "flex", flexDirection: "column", justifyContent: "flex-end", height: ALTO_PX }}>
+                              {h.tarde > 0 && <div style={{ width: "100%", height: alturaTarde, background: RED, borderRadius: alturaATiempo > 0 ? "2px 2px 0 0" : 2 }} />}
+                              {h.aTiempo > 0 && <div style={{ width: "100%", height: alturaATiempo, background: GREEN, borderRadius: alturaTarde > 0 ? "0 0 2px 2px" : 2 }} />}
+                            </div>
                             <div style={{ width: 20, display: "flex", justifyContent: "center", marginTop: 6 }}>
                               <span style={{ fontSize: 8, color: GRAY_500, whiteSpace: "nowrap", writingMode: "vertical-rl", transform: "rotate(180deg)" }}>{rango}</span>
                             </div>
@@ -1742,6 +1782,44 @@ export default function App() {
                     </div>
                   );
                 })()}
+              </div>
+
+              {/* Ranking de incumplimiento — proveedores que suben tarde a pesar de que Ejecución validó a tiempo */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 4 }}>Incumplimiento del Transporte (Ejecución sí cumplió)</div>
+                <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 12 }}>Solo tickets donde Ejecución validó antes del corte — el atraso es 100% atribuible al transportista</div>
+                {rankingIncumplimiento.length === 0 ? (
+                  <div style={{ fontSize: 12, color: GRAY_500, padding: "16px 0" }}>Sin transportistas con documentos subidos aún en el rango filtrado.</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                          <th style={{ textAlign: "left", padding: "8px 10px", color: GRAY_500, fontWeight: 500 }}>Proveedor</th>
+                          <th style={{ textAlign: "right", padding: "8px 10px", color: GRAY_500, fontWeight: 500 }}>Validados a tiempo</th>
+                          <th style={{ textAlign: "right", padding: "8px 10px", color: GRAY_500, fontWeight: 500 }}>Ya subieron</th>
+                          <th style={{ textAlign: "right", padding: "8px 10px", color: GRAY_500, fontWeight: 500 }}>Subieron tarde</th>
+                          <th style={{ textAlign: "right", padding: "8px 10px", color: GRAY_500, fontWeight: 500 }}>% Incumplimiento</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rankingIncumplimiento.map(r => {
+                          const pct = Number(r.pct_incumplimiento) || 0;
+                          const c = pct <= 10 ? GREEN : pct <= 30 ? AMBER : RED_DARK;
+                          return (
+                            <tr key={r.proveedor} style={{ borderBottom: `1px solid ${GRAY_100}` }}>
+                              <td style={{ padding: "8px 10px", color: GRAY_900, fontWeight: 500 }}>{r.proveedor}</td>
+                              <td style={{ textAlign: "right", padding: "8px 10px", color: GRAY_900 }}>{r.validados_a_tiempo}</td>
+                              <td style={{ textAlign: "right", padding: "8px 10px", color: GRAY_900 }}>{r.ya_subieron}</td>
+                              <td style={{ textAlign: "right", padding: "8px 10px", color: GRAY_900 }}>{r.subieron_tarde}</td>
+                              <td style={{ textAlign: "right", padding: "8px 10px", fontWeight: 600, color: c }}>{pct}%</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </>
           )}
