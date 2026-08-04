@@ -1179,7 +1179,7 @@ export default function App() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
-                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. {isAdmin ? 7 : 31} días</div>
+                  <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. 31 días</div>
                 </div>
                 <RangePicker desde={dDesde} hasta={dHasta} maxDias={31} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
                 {fechaErr && (
@@ -1924,7 +1924,7 @@ export default function App() {
               </>
             )}
           </div>
-        </div>  
+        </div>
       )}
 
       {detalleModal && (
