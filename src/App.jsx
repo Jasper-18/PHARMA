@@ -31,7 +31,7 @@ const MAX_MB = 10;
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
-  "Error mismo de la IA",
+  "Error de lectura de la IA",
 ];
 
 const COLS = [
@@ -497,7 +497,7 @@ export default function App() {
   function applyFilters() {
     if (dDesde && dHasta) {
       const diff = (new Date(dHasta) - new Date(dDesde)) / (1000 * 60 * 60 * 24);
-      const maxDias = isAdmin ? 7 : 31;
+      const maxDias = 31;
       if (diff < 0) { setFechaErr("La fecha 'Hasta' debe ser mayor o igual a 'Desde'."); return; }
       if (diff > maxDias) { setFechaErr(`El rango máximo permitido es de ${maxDias} días.`); return; }
     }
@@ -1181,7 +1181,7 @@ export default function App() {
                   <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Rango de fecha</div>
                   <div style={{ fontSize: 10, color: GRAY_500 }}>Máx. {isAdmin ? 7 : 31} días</div>
                 </div>
-                <RangePicker desde={dDesde} hasta={dHasta} maxDias={isAdmin ? 7 : 31} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
+                <RangePicker desde={dDesde} hasta={dHasta} maxDias={31} onChange={({ desde, hasta }) => { setDDesde(desde); setDHasta(hasta); setFechaErr(""); }} />
                 {fechaErr && (
                   <div style={{ marginTop: 8, padding: "7px 10px", background: RED_LIGHT, border: `0.5px solid #f7c1c1`, borderRadius: 7, fontSize: 11, color: RED_DARK }}>
                     ⚠ {fechaErr}
@@ -1924,7 +1924,7 @@ export default function App() {
               </>
             )}
           </div>
-        </div>
+        </div>  
       )}
 
       {detalleModal && (
