@@ -66,9 +66,8 @@ const COLS = [
 ];
 
 const COLS_TRANSPORTISTA_PRINCIPAL = [
-  "nro_spot", "fecha_carga", "estado_final", "cd_origen", "cd_destino",
-  "importe", "estado_confirmacion_transporte",
-  "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
+  "nro_spot", "fecha_carga", "estado_final", "estado_confirmacion_transporte", "cd_origen", "cd_destino",
+  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
 ];
 
 const COLS_TRANSPORTISTA_DETALLE = [
@@ -121,7 +120,7 @@ async function calcularRangoAncla_(isAdminUser, empresaId) {
   } catch { }
 
   const desde = new Date(ancla);
-  desde.setDate(ancla.getDate() - (isAdminUser ? 6 : 30));
+  desde.setDate(ancla.getDate() - 30);
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return { desde: fmt(desde), hasta: fmt(ancla) };
 }
@@ -1976,6 +1975,68 @@ export default function App() {
         </div>
       )}
 
+      {vista === "confirmaciones" && isAdmin && (
+        <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Confirmaciones</div>
+            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>Solicitudes de corrección de importe enviadas por el transporte, pendientes de tu revisión</div>
+          </div>
+
+          {solicitudesLoading && solicitudesPendientes.length === 0 ? (
+            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>Cargando...</div>
+          ) : solicitudesPendientes.length === 0 ? (
+            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay solicitudes pendientes de revisión.</div>
+          ) : (
+            <div style={{ background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 12, overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: GRAY_50, borderBottom: `0.5px solid ${BORDER}` }}>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>N° SPOT</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Proveedor</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Fecha Servicio</th>
+                    <th style={{ textAlign: "right", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Importe actual</th>
+                    <th style={{ textAlign: "right", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Propuesto</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Motivo</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Solicitado</th>
+                    <th style={{ padding: "9px 12px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {solicitudesPendientes.map(s => (
+                    <tr key={s.id} style={{ borderBottom: `0.5px solid ${GRAY_100}` }}>
+                      <td style={{ padding: "9px 12px", fontFamily: "monospace", fontSize: 10, color: GRAY_900 }}>{s.nro_spot}</td>
+                      <td style={{ padding: "9px 12px", color: GRAY_900 }}>{s.viajes?.proveedor || "—"}</td>
+                      <td style={{ padding: "9px 12px", color: GRAY_900 }}>{s.viajes?.fecha_carga ? fmtFechaSolo(s.viajes.fecha_carga) : "—"}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", color: GRAY_500 }}>S/ {s.valor_actual || "—"}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: GRAY_900 }}>S/ {s.valor_propuesto}</td>
+                      <td style={{ padding: "9px 12px", color: GRAY_900, maxWidth: 220 }}>{s.motivo}</td>
+                      <td style={{ padding: "9px 12px", color: GRAY_500, fontSize: 11 }}>{s.creado_en ? fmtFechaHora(s.creado_en) : "—"}</td>
+                      <td style={{ padding: "9px 12px" }}>
+                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                          <button onClick={() => handleAprobarSolicitud(s)} title="Aprobar"
+                            style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GREEN}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          </button>
+                          <button onClick={() => { setRechazoModal(s); setRechazoMotivo(""); setRechazoErr(""); }} title="Rechazar"
+                            style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${RED}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18"/>
+                              <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
         </div>
       </div>
 
@@ -2074,68 +2135,6 @@ export default function App() {
               </>
             )}
           </div>
-        </div>
-      )}
-
-      {vista === "confirmaciones" && isAdmin && (
-        <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Confirmaciones</div>
-            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>Solicitudes de corrección de importe enviadas por el transporte, pendientes de tu revisión</div>
-          </div>
-
-          {solicitudesLoading && solicitudesPendientes.length === 0 ? (
-            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>Cargando...</div>
-          ) : solicitudesPendientes.length === 0 ? (
-            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay solicitudes pendientes de revisión.</div>
-          ) : (
-            <div style={{ background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 12, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: GRAY_50, borderBottom: `0.5px solid ${BORDER}` }}>
-                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>N° SPOT</th>
-                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Proveedor</th>
-                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Fecha Servicio</th>
-                    <th style={{ textAlign: "right", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Importe actual</th>
-                    <th style={{ textAlign: "right", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Propuesto</th>
-                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Motivo</th>
-                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Solicitado</th>
-                    <th style={{ padding: "9px 12px" }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {solicitudesPendientes.map(s => (
-                    <tr key={s.id} style={{ borderBottom: `0.5px solid ${GRAY_100}` }}>
-                      <td style={{ padding: "9px 12px", fontFamily: "monospace", fontSize: 10, color: GRAY_900 }}>{s.nro_spot}</td>
-                      <td style={{ padding: "9px 12px", color: GRAY_900 }}>{s.viajes?.proveedor || "—"}</td>
-                      <td style={{ padding: "9px 12px", color: GRAY_900 }}>{s.viajes?.fecha_carga ? fmtFechaSolo(s.viajes.fecha_carga) : "—"}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", color: GRAY_500 }}>S/ {s.valor_actual || "—"}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: GRAY_900 }}>S/ {s.valor_propuesto}</td>
-                      <td style={{ padding: "9px 12px", color: GRAY_900, maxWidth: 220 }}>{s.motivo}</td>
-                      <td style={{ padding: "9px 12px", color: GRAY_500, fontSize: 11 }}>{s.creado_en ? fmtFechaHora(s.creado_en) : "—"}</td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button onClick={() => handleAprobarSolicitud(s)} title="Aprobar"
-                            style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GREEN}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="20 6 9 17 4 12"/>
-                            </svg>
-                          </button>
-                          <button onClick={() => { setRechazoModal(s); setRechazoMotivo(""); setRechazoErr(""); }} title="Rechazar"
-                            style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${RED}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <line x1="18" y1="6" x2="6" y2="18"/>
-                              <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
 
