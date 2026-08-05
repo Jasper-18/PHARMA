@@ -837,6 +837,15 @@ export default function App() {
     finally { setSolicitudSaving(false); }
   }
 
+  // --- Admin: cola de solicitudes pendientes -- se declara más abajo, después
+  // de "isAdmin" (ver justo debajo de "const initials"), porque depende de esa
+  // constante y en JS no se puede leer un const antes de que se declare.
+
+  const meta    = session?.user?.user_metadata;
+  const isAdmin = meta?.role === "admin";
+  const empresa = meta?.empresa_id || "";
+  const initials= (session?.user?.email || "U").substring(0, 2).toUpperCase();
+
   // --- Admin: cola de solicitudes pendientes ---
   const fetchSolicitudesPendientes = useCallback(async () => {
     if (!isAdmin) return;
@@ -893,11 +902,6 @@ export default function App() {
     } catch (err) { setRechazoErr(err.message || "Error al rechazar."); }
     finally { setRechazoSaving(false); }
   }
-
-  const meta    = session?.user?.user_metadata;
-  const isAdmin = meta?.role === "admin";
-  const empresa = meta?.empresa_id || "";
-  const initials= (session?.user?.email || "U").substring(0, 2).toUpperCase();
   const inp     = { padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", color: GRAY_900, outline: "none" };
 
   const fetchDashboard = useCallback(async () => {
