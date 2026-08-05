@@ -34,13 +34,29 @@ const MOTIVOS_VALIDACION = [
   "Error de lectura de la IA",
 ];
 
+// Campos que el transporte puede observar/proponer corrección. Blindado
+// también en la BD con un CHECK sobre solicitudes_correccion.campo -- si se
+// agrega uno acá, agregarlo también al CHECK en Supabase.
+const CAMPOS_OBSERVABLES = [
+  { key: "cd_origen",        label: "Origen" },
+  { key: "cd_destino",       label: "Destino" },
+  { key: "importe",          label: "Importe" },
+  { key: "detalle_servicio", label: "Detalle del Servicio" },
+];
+const CAMPO_LABEL = Object.fromEntries(CAMPOS_OBSERVABLES.map(c => [c.key, c.label]));
+
+// TEMPORAL: la función de observaciones está en piloto solo con RANSA (ya no
+// opera, así que sus tickets sirven para probar sin afectar transportistas
+// activos). Cuando el equipo la valide para todos, cambiar a null.
+const PILOTO_OBSERVACIONES_PROVEEDOR = "RANSA";
+
 const COLS = [
   { key: "fecha_registro",      label: "Fecha Registro",           width: 118, adminOnly: true },
   { key: "solicitante",         label: "Solicitante",              width: 160, trunc: true, adminOnly: true },
   { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
-  { key: "estado_confirmacion_transporte", label: "Confirmación Importe", width: 160 },
+  { key: "estado_observacion_transporte", label: "Observación", width: 140 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
   { key: "rutas",               label: "N° GR",                    width: 140, trunc: true, headerGroup: "transportista" },
   { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
@@ -66,7 +82,7 @@ const COLS = [
 ];
 
 const COLS_TRANSPORTISTA_PRINCIPAL = [
-  "nro_spot", "fecha_carga", "estado_final", "estado_confirmacion_transporte", "cd_origen", "cd_destino",
+  "nro_spot", "fecha_carga", "estado_final", "estado_observacion_transporte", "cd_origen", "cd_destino",
   "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
 ];
 
@@ -334,12 +350,10 @@ export default function App() {
   const [validErr,     setValidErr]     = useState("");
   const [motivoValidacion, setMotivoValidacion] = useState("");
 
-  // --- Confirmación de información por el transporte ---
-  const [confirmModal,  setConfirmModal]  = useState(null); // viaje a confirmar (transportista)
-  const [confirmSaving, setConfirmSaving] = useState(false);
-  const [confirmErr,    setConfirmErr]    = useState("");
-
-  const [solicitudModal,  setSolicitudModal]  = useState(null); // viaje al que se le pide corrección (transportista)
+  // --- Observaciones del transporte (opt-out: por defecto todo pasa; el
+  // transporte solo actúa si algo está mal) ---
+  const [solicitudModal,  setSolicitudModal]  = useState(null); // viaje al que se le agrega una observación (transportista)
+  const [solicitudCampo,  setSolicitudCampo]  = useState("importe"); // qué campo quiere corregir
   const [solicitudValor,  setSolicitudValor]  = useState("");
   const [solicitudMotivo, setSolicitudMotivo] = useState("");
   const [solicitudSaving, setSolicitudSaving] = useState(false);
@@ -798,42 +812,29 @@ export default function App() {
     finally { setValidSaving(false); }
   }
 
-  // --- Transportista: confirmar información tal cual está ---
-  async function handleConfirmarInformacion() {
-    if (!confirmModal) return;
-    setConfirmSaving(true); setConfirmErr("");
-    try {
-      const ahora = new Date().toISOString();
-      const payload = { fecha_confirmacion_transporte: ahora, estado_confirmacion_transporte: "CONFIRMADO" };
-      const { data, error } = await supabase.from("viajes").update(payload).eq("nro_spot", confirmModal.nro_spot).select().single();
-      if (error) throw error;
-      setViajes(prev => prev.map(v => v.nro_spot === confirmModal.nro_spot ? { ...v, ...data } : v));
-      setConfirmModal(null);
-    } catch (err) { setConfirmErr(err.message || "Error al confirmar."); }
-    finally { setConfirmSaving(false); }
-  }
-
-  // --- Transportista: solicitar corrección de Importe (queda pendiente de tu revisión) ---
+  // --- Transportista: agregar una observación sobre un campo del ticket
+  // (queda pendiente de tu revisión; si no se agrega ninguna, el ticket migra
+  // solo -- modelo opt-out) ---
   async function handleSolicitarCorreccion() {
     if (!solicitudModal) return;
-    if (!solicitudValor.trim()) { setSolicitudErr("Ingresa el importe correcto."); return; }
+    if (!solicitudValor.trim()) { setSolicitudErr("Ingresa el valor correcto."); return; }
     if (!solicitudMotivo.trim()) { setSolicitudErr("Explica el motivo del cambio."); return; }
     setSolicitudSaving(true); setSolicitudErr("");
     try {
       const { error } = await supabase.from("solicitudes_correccion").insert({
         nro_spot: solicitudModal.nro_spot,
-        campo: "importe",
-        valor_actual: solicitudModal.importe ?? "",
+        campo: solicitudCampo,
+        valor_actual: solicitudModal[solicitudCampo] ?? "",
         valor_propuesto: solicitudValor.trim(),
         motivo: solicitudMotivo.trim(),
         creado_por: session.user.email,
       });
       if (error) throw error;
-      // El trigger trg_solicitud_enviada ya deja esto en SOLICITUD_ENVIADA en la BD;
+      // El trigger trg_solicitud_enviada ya deja esto en PENDIENTE en la BD;
       // se refleja localmente para no esperar un refetch completo.
-      setViajes(prev => prev.map(v => v.nro_spot === solicitudModal.nro_spot ? { ...v, estado_confirmacion_transporte: "SOLICITUD_ENVIADA" } : v));
+      setViajes(prev => prev.map(v => v.nro_spot === solicitudModal.nro_spot ? { ...v, estado_observacion_transporte: "PENDIENTE" } : v));
       setSolicitudModal(null); setSolicitudValor(""); setSolicitudMotivo("");
-    } catch (err) { setSolicitudErr(err.message || "Error al enviar la solicitud."); }
+    } catch (err) { setSolicitudErr(err.message || "Error al enviar la observación."); }
     finally { setSolicitudSaving(false); }
   }
 
@@ -874,14 +875,15 @@ export default function App() {
 
   async function handleAprobarSolicitud(s) {
     try {
-      // El trigger trg_resolver_solicitud aplica el importe propuesto y confirma
-      // el viaje solo -- acá solo se cierra la solicitud.
+      // El trigger trg_resolver_solicitud escribe el valor propuesto en el
+      // campo correcto (SQL dinámico, blindado con CHECK) y limpia la
+      // observación -- acá solo se cierra la solicitud.
       const { error } = await supabase.from("solicitudes_correccion")
         .update({ estado: "APROBADA", revisado_por: session.user.email, revisado_en: new Date().toISOString() })
         .eq("id", s.id);
       if (error) throw error;
       setSolicitudesPendientes(prev => prev.filter(x => x.id !== s.id));
-      setViajes(prev => prev.map(v => v.nro_spot === s.nro_spot ? { ...v, importe: s.valor_propuesto, estado_confirmacion_transporte: "CONFIRMADO" } : v));
+      setViajes(prev => prev.map(v => v.nro_spot === s.nro_spot ? { ...v, [s.campo]: s.valor_propuesto, estado_observacion_transporte: "SIN_OBSERVACION" } : v));
     } catch (err) {
       alert("Error al aprobar la solicitud: " + (err.message || ""));
     }
@@ -892,12 +894,14 @@ export default function App() {
     if (!rechazoMotivo.trim()) { setRechazoErr("Explica el motivo del rechazo."); return; }
     setRechazoSaving(true); setRechazoErr("");
     try {
+      // Rechazar = la observación queda descartada; el ticket vuelve directo
+      // a "sin observación" -- ya se gestionó con el transporte, no bloquea.
       const { error } = await supabase.from("solicitudes_correccion")
         .update({ estado: "RECHAZADA", revisado_por: session.user.email, revisado_en: new Date().toISOString(), motivo_rechazo: rechazoMotivo.trim() })
         .eq("id", rechazoModal.id);
       if (error) throw error;
       setSolicitudesPendientes(prev => prev.filter(x => x.id !== rechazoModal.id));
-      setViajes(prev => prev.map(v => v.nro_spot === rechazoModal.nro_spot ? { ...v, estado_confirmacion_transporte: "RECHAZADA" } : v));
+      setViajes(prev => prev.map(v => v.nro_spot === rechazoModal.nro_spot ? { ...v, estado_observacion_transporte: "SIN_OBSERVACION" } : v));
       setRechazoModal(null); setRechazoMotivo("");
     } catch (err) { setRechazoErr(err.message || "Error al rechazar."); }
     finally { setRechazoSaving(false); }
@@ -973,8 +977,8 @@ export default function App() {
     "No realizados":     q => q.eq("realizado", "NO"),
     "Pendiente escaneo": q => q.eq("realizado", "SI").is("foto_url", null).eq("estado_final", "PENDIENTE"),
     "Observado IA":      q => q.eq("realizado", "SI").eq("estado_final", "OBSERVADO"),
-    "Pendiente confirmación transporte": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_confirmacion_transporte", "CONFIRMADO"),
-    "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_confirmacion_transporte", "CONFIRMADO"),
+    "Observado Transporte": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_observacion_transporte", "PENDIENTE"),
+    "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_observacion_transporte", "PENDIENTE"),
   };
 
   async function abrirDetalleCascada(categoria) {
@@ -1056,7 +1060,7 @@ export default function App() {
     setDashLoading(true);
     try {
       let q = supabase.from("viajes").select("*")
-        .eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_confirmacion_transporte", "CONFIRMADO")
+        .eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_observacion_transporte", "PENDIENTE")
         .order("fecha_carga", { ascending: true });
       if (dashProveedor) q = q.eq("proveedor", dashProveedor);
       if (dashDesde) q = q.gte("fecha_carga", dashDesde);
@@ -1142,9 +1146,12 @@ export default function App() {
     </div>
   );
 
+  const enPilotoObservaciones = !PILOTO_OBSERVACIONES_PROVEEDOR || empresa === PILOTO_OBSERVACIONES_PROVEEDOR;
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
-    : COLS_TRANSPORTISTA_PRINCIPAL.map(key => COLS.find(c => c.key === key)).filter(Boolean);
+    : COLS_TRANSPORTISTA_PRINCIPAL
+        .filter(key => enPilotoObservaciones || key !== "estado_observacion_transporte")
+        .map(key => COLS.find(c => c.key === key)).filter(Boolean);
   const colsDetalleExtra = COLS_TRANSPORTISTA_DETALLE.map(key => COLS.find(c => c.key === key)).filter(Boolean);
 
   return (
@@ -1221,7 +1228,7 @@ export default function App() {
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                   <polyline points="22 4 12 14.01 9 11.01"></polyline>
                 </svg>
-                Confirmaciones
+                Observaciones
               </span>
               {solicitudesPendientes.length > 0 && (
                 <span style={{ background: solicitudesPendientes.length > 0 ? RED : GRAY_200, color: "white", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "1px 7px", minWidth: 16, textAlign: "center" }}>
@@ -1385,17 +1392,13 @@ export default function App() {
                         content = ef
                           ? <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{ef}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (c.key === "estado_confirmacion_transporte") {
-                        // Solo tiene sentido mostrar esto una vez que Estado Final ya es FINALIZADO --
-                        // antes de eso el transporte todavía no tiene nada que confirmar.
-                        if (v.estado_final !== "FINALIZADO") {
+                      } else if (c.key === "estado_observacion_transporte") {
+                        // Solo tiene sentido mostrar esto una vez que Estado Final ya es FINALIZADO.
+                        // Modelo opt-out: sin observación = todo bien, no hace falta resaltarlo.
+                        if (v.estado_final !== "FINALIZADO" || v.estado_observacion_transporte !== "PENDIENTE") {
                           content = <span style={{ color: GRAY_200 }}>—</span>;
                         } else {
-                          const ect = v.estado_confirmacion_transporte || "PENDIENTE";
-                          const bg = ect === "CONFIRMADO" ? GREEN_LIGHT : ect === "SOLICITUD_ENVIADA" ? BLUE_LIGHT : ect === "RECHAZADA" ? RED_LIGHT : AMBER_LIGHT;
-                          const fg = ect === "CONFIRMADO" ? GREEN : ect === "SOLICITUD_ENVIADA" ? BLUE : ect === "RECHAZADA" ? RED_DARK : AMBER;
-                          const label = ect === "CONFIRMADO" ? "CONFIRMADO" : ect === "SOLICITUD_ENVIADA" ? "SOLICITUD ENVIADA" : ect === "RECHAZADA" ? "RECHAZADA" : "PENDIENTE";
-                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
+                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: AMBER_LIGHT, color: AMBER, whiteSpace: "nowrap" }}>OBSERVADO</span>;
                         }
                       } else if (["realizado","estado_doc","estado_procesamiento_ia"].includes(c.key)) {
                         content = v[c.key]
@@ -1615,7 +1618,7 @@ export default function App() {
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
                     { label: "Pendiente escaneo", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
                     { label: "Observado IA", val: kpis.cascada_observado || 0, color: "#e00000" },
-                    { label: "Pendiente confirmación transporte", val: kpis.cascada_pendiente_confirmacion || 0, color: "#c00000" },
+                    { label: "Observado Transporte", val: kpis.cascada_observado_transporte || 0, color: "#c00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado, landing: base };
@@ -1700,7 +1703,7 @@ export default function App() {
                   );
                 })()}
                 {(() => {
-                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Pendiente confirmación transporte", "Listos para migrar"];
+                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Observado Transporte", "Listos para migrar"];
                   return (
                     <div style={{ display: "flex", marginLeft: 32 }}>
                       {barrasLabels.map(l => (
@@ -1978,8 +1981,8 @@ export default function App() {
       {vista === "confirmaciones" && isAdmin && (
         <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Confirmaciones</div>
-            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>Solicitudes de corrección de importe enviadas por el transporte, pendientes de tu revisión</div>
+            <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Observaciones</div>
+            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>Observaciones enviadas por el transporte sobre datos del ticket, pendientes de tu revisión</div>
           </div>
 
           {solicitudesLoading && solicitudesPendientes.length === 0 ? (
@@ -1994,8 +1997,9 @@ export default function App() {
                     <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>N° SPOT</th>
                     <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Proveedor</th>
                     <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Fecha Servicio</th>
-                    <th style={{ textAlign: "right", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Importe actual</th>
-                    <th style={{ textAlign: "right", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Propuesto</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Campo</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Valor actual</th>
+                    <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Propuesto</th>
                     <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Motivo</th>
                     <th style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em" }}>Solicitado</th>
                     <th style={{ padding: "9px 12px" }}></th>
@@ -2007,8 +2011,9 @@ export default function App() {
                       <td style={{ padding: "9px 12px", fontFamily: "monospace", fontSize: 10, color: GRAY_900 }}>{s.nro_spot}</td>
                       <td style={{ padding: "9px 12px", color: GRAY_900 }}>{s.viajes?.proveedor || "—"}</td>
                       <td style={{ padding: "9px 12px", color: GRAY_900 }}>{s.viajes?.fecha_carga ? fmtFechaSolo(s.viajes.fecha_carga) : "—"}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", color: GRAY_500 }}>S/ {s.valor_actual || "—"}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: GRAY_900 }}>S/ {s.valor_propuesto}</td>
+                      <td style={{ padding: "9px 12px", color: GRAY_900 }}>{CAMPO_LABEL[s.campo] || s.campo}</td>
+                      <td style={{ padding: "9px 12px", color: GRAY_500 }}>{s.valor_actual || "—"}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 600, color: GRAY_900 }}>{s.valor_propuesto}</td>
                       <td style={{ padding: "9px 12px", color: GRAY_900, maxWidth: 220 }}>{s.motivo}</td>
                       <td style={{ padding: "9px 12px", color: GRAY_500, fontSize: 11 }}>{s.creado_en ? fmtFechaHora(s.creado_en) : "—"}</td>
                       <td style={{ padding: "9px 12px" }}>
@@ -2168,56 +2173,28 @@ export default function App() {
               })}
             </div>
 
-            {detalleModal.estado_final === "FINALIZADO" && (
+            {detalleModal.estado_final === "FINALIZADO" && enPilotoObservaciones && (
               <div style={{ marginTop: 16, paddingTop: 16, borderTop: `0.5px solid ${BORDER}` }}>
-                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Confirmación de información</div>
+                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Observaciones</div>
 
-                {(!detalleModal.estado_confirmacion_transporte || detalleModal.estado_confirmacion_transporte === "PENDIENTE") && (
+                {detalleModal.estado_observacion_transporte === "PENDIENTE" ? (
+                  <div style={{ padding: "10px 12px", background: AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: GRAY_900 }}>
+                    <div style={{ color: AMBER, fontWeight: 600, marginBottom: 4 }}>Esperando revisión</div>
+                    <div>Propusiste cambiar <strong>{CAMPO_LABEL[detalleModal.campo_propuesto_transporte] || detalleModal.campo_propuesto_transporte}</strong> a: <strong>{detalleModal.valor_propuesto_transporte}</strong></div>
+                    <div style={{ color: GRAY_500, marginTop: 2 }}>{detalleModal.motivo_observacion_transporte}</div>
+                  </div>
+                ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ fontSize: 12, color: GRAY_500 }}>Revisa que el importe (S/ {detalleModal.importe ?? "—"}) sea correcto.</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => { setConfirmModal(detalleModal); setConfirmErr(""); }}
-                        style={{ flex: 1, padding: "8px 0", background: GREEN, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                        ✓ Confirmar información
-                      </button>
-                      <button onClick={() => { setSolicitudModal(detalleModal); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
-                        style={{ flex: 1, padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
-                        Solicitar corrección
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {detalleModal.estado_confirmacion_transporte === "CONFIRMADO" && (
-                  <div style={{ padding: "8px 12px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN }}>
-                    ✓ Confirmaste esta información{detalleModal.fecha_confirmacion_transporte ? ` el ${fmtFechaHora(detalleModal.fecha_confirmacion_transporte)}` : ""}.
-                  </div>
-                )}
-
-                {detalleModal.estado_confirmacion_transporte === "SOLICITUD_ENVIADA" && (
-                  <div style={{ padding: "10px 12px", background: BLUE_LIGHT, borderRadius: 8, fontSize: 12, color: GRAY_900 }}>
-                    <div style={{ color: BLUE, fontWeight: 600, marginBottom: 4 }}>Esperando revisión</div>
-                    <div>Propusiste: <strong>S/ {detalleModal.importe_propuesto_transporte}</strong></div>
-                    <div style={{ color: GRAY_500, marginTop: 2 }}>{detalleModal.motivo_solicitud_transporte}</div>
-                  </div>
-                )}
-
-                {detalleModal.estado_confirmacion_transporte === "RECHAZADA" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ padding: "10px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 12 }}>
-                      <div style={{ color: RED_DARK, fontWeight: 600, marginBottom: 4 }}>Tu solicitud fue rechazada</div>
-                      <div style={{ color: GRAY_900 }}>{detalleModal.motivo_rechazo_confirmacion}</div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => { setConfirmModal(detalleModal); setConfirmErr(""); }}
-                        style={{ flex: 1, padding: "8px 0", background: GREEN, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                        ✓ Confirmar información
-                      </button>
-                      <button onClick={() => { setSolicitudModal(detalleModal); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
-                        style={{ flex: 1, padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
-                        Volver a solicitar
-                      </button>
-                    </div>
+                    {detalleModal.motivo_rechazo_observacion && (
+                      <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK }}>
+                        Tu última observación fue rechazada: {detalleModal.motivo_rechazo_observacion}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: GRAY_500 }}>¿Algo no está correcto en este ticket? (Origen, Destino, Importe o Detalle del Servicio)</div>
+                    <button onClick={() => { setSolicitudModal(detalleModal); setSolicitudCampo("importe"); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
+                      style={{ padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                      Agregar observación
+                    </button>
                   </div>
                 )}
               </div>
@@ -2230,60 +2207,36 @@ export default function App() {
         </div>
       )}
 
-      {confirmModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
-          onClick={e => e.target === e.currentTarget && !confirmSaving && setConfirmModal(null)}>
-          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", background: GREEN_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Confirmar información</div>
-                <div style={{ fontSize: 12, color: GRAY_500 }}>
-                  ¿Confirmas que el importe (S/ {confirmModal.importe ?? "—"}) del viaje{" "}
-                  <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{confirmModal.nro_spot}</span> es correcto?
-                </div>
-              </div>
-            </div>
-            {confirmErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {confirmErr}</div>}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmModal(null)} disabled={confirmSaving}
-                style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
-              <button onClick={handleConfirmarInformacion} disabled={confirmSaving}
-                style={{ padding: "7px 20px", background: confirmSaving ? GRAY_200 : GREEN, color: confirmSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: confirmSaving ? "default" : "pointer" }}>
-                {confirmSaving ? "Confirmando..." : "Sí, confirmar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {solicitudModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && !solicitudSaving && setSolicitudModal(null)}>
           <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>Solicitar corrección de Importe</div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Agregar observación</div>
               <button onClick={() => setSolicitudModal(null)} disabled={solicitudSaving} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{solicitudModal.nro_spot}</div>
 
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Importe actual</div>
-              <div style={{ fontSize: 13, color: GRAY_500 }}>S/ {solicitudModal.importe ?? "—"}</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>¿Qué dato está mal?</div>
+              <select value={solicitudCampo} onChange={e => { setSolicitudCampo(e.target.value); setSolicitudValor(""); setSolicitudErr(""); }}
+                style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
+                {CAMPOS_OBSERVABLES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
             </div>
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Importe correcto (propuesto)</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Valor actual</div>
+              <div style={{ fontSize: 13, color: GRAY_500 }}>{solicitudModal[solicitudCampo] ?? "—"}</div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Valor correcto (propuesto)</div>
               <input value={solicitudValor} onChange={e => { setSolicitudValor(e.target.value); setSolicitudErr(""); }}
-                placeholder="Ej. 850.00" style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                placeholder={solicitudCampo === "importe" ? "Ej. 850.00" : "Ej. CD Santa Anita"} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
             </div>
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Motivo del cambio</div>
               <textarea value={solicitudMotivo} onChange={e => { setSolicitudMotivo(e.target.value); setSolicitudErr(""); }}
-                placeholder="Explica por qué el importe debería ser distinto..." rows={3}
+                placeholder="Explica por qué este dato debería ser distinto..." rows={3}
                 style={{ ...inp, width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
             </div>
             {solicitudErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {solicitudErr}</div>}
@@ -2291,7 +2244,7 @@ export default function App() {
               <button onClick={() => setSolicitudModal(null)} disabled={solicitudSaving} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
               <button onClick={handleSolicitarCorreccion} disabled={solicitudSaving}
                 style={{ padding: "7px 16px", background: solicitudSaving ? GRAY_200 : RED, color: solicitudSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: solicitudSaving ? "default" : "pointer" }}>
-                {solicitudSaving ? "Enviando..." : "Enviar solicitud"}
+                {solicitudSaving ? "Enviando..." : "Enviar observación"}
               </button>
             </div>
           </div>
