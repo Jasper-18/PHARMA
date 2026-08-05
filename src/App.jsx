@@ -2197,7 +2197,7 @@ export default function App() {
                         Tu última observación fue rechazada: {detalleModal.motivo_rechazo_observacion}
                       </div>
                     )}
-                    <div style={{ fontSize: 12, color: GRAY_500 }}>Si cuenta con alguna observación en la información del ticket (Importe, etc.), repórtala aquí.</div>
+                    <div style={{ fontSize: 12, color: GRAY_500 }}>Reporta aquí cualquier dato incorrecto del ticket (Importe, etc.).</div>
                     <button onClick={() => { setSolicitudModal(detalleModal); setSolicitudCampo("importe"); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
                       style={{ padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
                       Agregar observación
@@ -2225,7 +2225,7 @@ export default function App() {
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{solicitudModal.nro_spot}</div>
 
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Columna a editar:</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Columna observada:</div>
               <select value={solicitudCampo} onChange={e => { setSolicitudCampo(e.target.value); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
                 style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
                 {CAMPOS_OBSERVABLES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
