@@ -817,16 +817,21 @@ export default function App() {
   // solo -- modelo opt-out) ---
   async function handleSolicitarCorreccion() {
     if (!solicitudModal) return;
-    if (!solicitudValor.trim()) { setSolicitudErr("Ingresa el valor correcto."); return; }
-    if (!solicitudMotivo.trim()) { setSolicitudErr("Explica el motivo del cambio."); return; }
+    if (!solicitudValor.trim()) { setSolicitudErr("Ingresa el valor propuesto."); return; }
+    if (solicitudCampo === "importe" && !solicitudMotivo.trim()) { setSolicitudErr("Explica el motivo del cambio."); return; }
     setSolicitudSaving(true); setSolicitudErr("");
     try {
+      // Importe es numérico -- normaliza coma decimal a punto para que no
+      // queden inconsistencias con el resto de importes en la BD.
+      const valorFinal = solicitudCampo === "importe"
+        ? solicitudValor.trim().replace(",", ".")
+        : solicitudValor.trim();
       const { error } = await supabase.from("solicitudes_correccion").insert({
         nro_spot: solicitudModal.nro_spot,
         campo: solicitudCampo,
         valor_actual: solicitudModal[solicitudCampo] ?? "",
-        valor_propuesto: solicitudValor.trim(),
-        motivo: solicitudMotivo.trim(),
+        valor_propuesto: valorFinal,
+        motivo: solicitudCampo === "importe" ? solicitudMotivo.trim() : "",
         creado_por: session.user.email,
       });
       if (error) throw error;
@@ -2014,7 +2019,7 @@ export default function App() {
                       <td style={{ padding: "9px 12px", color: GRAY_900 }}>{CAMPO_LABEL[s.campo] || s.campo}</td>
                       <td style={{ padding: "9px 12px", color: GRAY_500 }}>{s.valor_actual || "—"}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 600, color: GRAY_900 }}>{s.valor_propuesto}</td>
-                      <td style={{ padding: "9px 12px", color: GRAY_900, maxWidth: 220 }}>{s.motivo}</td>
+                      <td style={{ padding: "9px 12px", color: s.motivo ? GRAY_900 : GRAY_200, maxWidth: 220 }}>{s.motivo || "—"}</td>
                       <td style={{ padding: "9px 12px", color: GRAY_500, fontSize: 11 }}>{s.creado_en ? fmtFechaHora(s.creado_en) : "—"}</td>
                       <td style={{ padding: "9px 12px" }}>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -2181,7 +2186,9 @@ export default function App() {
                   <div style={{ padding: "10px 12px", background: AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: GRAY_900 }}>
                     <div style={{ color: AMBER, fontWeight: 600, marginBottom: 4 }}>Esperando revisión</div>
                     <div>Propusiste cambiar <strong>{CAMPO_LABEL[detalleModal.campo_propuesto_transporte] || detalleModal.campo_propuesto_transporte}</strong> a: <strong>{detalleModal.valor_propuesto_transporte}</strong></div>
-                    <div style={{ color: GRAY_500, marginTop: 2 }}>{detalleModal.motivo_observacion_transporte}</div>
+                    {detalleModal.motivo_observacion_transporte && (
+                      <div style={{ color: GRAY_500, marginTop: 2 }}>{detalleModal.motivo_observacion_transporte}</div>
+                    )}
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2190,7 +2197,7 @@ export default function App() {
                         Tu última observación fue rechazada: {detalleModal.motivo_rechazo_observacion}
                       </div>
                     )}
-                    <div style={{ fontSize: 12, color: GRAY_500 }}>¿Algo no está correcto en este ticket? (Origen, Destino, Importe o Detalle del Servicio)</div>
+                    <div style={{ fontSize: 12, color: GRAY_500 }}>Si cuenta con alguna observación en la información del ticket (Importe, etc.), repórtala aquí.</div>
                     <button onClick={() => { setSolicitudModal(detalleModal); setSolicitudCampo("importe"); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
                       style={{ padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
                       Agregar observación
@@ -2218,8 +2225,8 @@ export default function App() {
             <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{solicitudModal.nro_spot}</div>
 
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>¿Qué dato está mal?</div>
-              <select value={solicitudCampo} onChange={e => { setSolicitudCampo(e.target.value); setSolicitudValor(""); setSolicitudErr(""); }}
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Columna a editar:</div>
+              <select value={solicitudCampo} onChange={e => { setSolicitudCampo(e.target.value); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
                 style={{ ...inp, width: "100%", boxSizing: "border-box" }}>
                 {CAMPOS_OBSERVABLES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select>
@@ -2229,16 +2236,18 @@ export default function App() {
               <div style={{ fontSize: 13, color: GRAY_500 }}>{solicitudModal[solicitudCampo] ?? "—"}</div>
             </div>
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Valor correcto (propuesto)</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Valor propuesto</div>
               <input value={solicitudValor} onChange={e => { setSolicitudValor(e.target.value); setSolicitudErr(""); }}
-                placeholder={solicitudCampo === "importe" ? "Ej. 850.00" : "Ej. CD Santa Anita"} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+                style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
             </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Motivo del cambio</div>
-              <textarea value={solicitudMotivo} onChange={e => { setSolicitudMotivo(e.target.value); setSolicitudErr(""); }}
-                placeholder="Explica por qué este dato debería ser distinto..." rows={3}
-                style={{ ...inp, width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
-            </div>
+            {solicitudCampo === "importe" && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5, fontWeight: 500 }}>Motivo del cambio</div>
+                <textarea value={solicitudMotivo} onChange={e => { setSolicitudMotivo(e.target.value); setSolicitudErr(""); }}
+                  rows={3}
+                  style={{ ...inp, width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
+              </div>
+            )}
             {solicitudErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {solicitudErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setSolicitudModal(null)} disabled={solicitudSaving} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
