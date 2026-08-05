@@ -40,7 +40,7 @@ const COLS = [
   { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
-  { key: "estado_confirmacion_transporte", label: "Confirmación Transporte", width: 160 },
+  { key: "estado_confirmacion_transporte", label: "Confirmación Importe", width: 160 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
   { key: "rutas",               label: "N° GR",                    width: 140, trunc: true, headerGroup: "transportista" },
   { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
@@ -49,7 +49,7 @@ const COLS = [
   { key: "cd_origen",           label: "Origen",                   width: 130 },
   { key: "cd_destino",          label: "Destino",                  width: 130 },
   { key: "tipo_traslado",       label: "Tipo de Envío",            width: 90 },
-  { key: "cantidad",            label: "Cantidad",                 width: 80,  right: true },
+  { key: "cantidad",            label: "Cantidad Bultos",          width: 80,  right: true },
   { key: "area",                label: "Área",                     width: 120 },
   { key: "requerimiento",       label: "Requerimiento",            width: 160, trunc: true },
   { key: "importe",             label: "Importe",                  width: 90,  right: true },
@@ -66,8 +66,9 @@ const COLS = [
 ];
 
 const COLS_TRANSPORTISTA_PRINCIPAL = [
-  "nro_spot", "fecha_carga", "estado_final", "estado_confirmacion_transporte", "cd_origen", "cd_destino",
-  "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia", "importe",
+  "nro_spot", "fecha_carga", "estado_final", "cd_origen", "cd_destino",
+  "importe", "estado_confirmacion_transporte",
+  "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
 ];
 
 const COLS_TRANSPORTISTA_DETALLE = [
