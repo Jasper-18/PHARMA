@@ -362,6 +362,8 @@ export default function App() {
   const [solicitudesPendientes, setSolicitudesPendientes] = useState([]); // cola de revisión (admin)
   const [solicitudesLoading,    setSolicitudesLoading]    = useState(false);
 
+  const [aprobarModal,  setAprobarModal]  = useState(null); // solicitud a aprobar (admin) -- confirmación antes de aplicar
+  const [aprobarSaving, setAprobarSaving] = useState(false);
   const [rechazoModal,  setRechazoModal]  = useState(null); // solicitud a rechazar (admin)
   const [rechazoMotivo, setRechazoMotivo] = useState("");
   const [rechazoSaving, setRechazoSaving] = useState(false);
@@ -879,6 +881,7 @@ export default function App() {
   }, [isAdmin, fetchSolicitudesPendientes]);
 
   async function handleAprobarSolicitud(s) {
+    setAprobarSaving(true);
     try {
       // El trigger trg_resolver_solicitud escribe el valor propuesto en el
       // campo correcto (SQL dinámico, blindado con CHECK) y limpia la
@@ -889,8 +892,11 @@ export default function App() {
       if (error) throw error;
       setSolicitudesPendientes(prev => prev.filter(x => x.id !== s.id));
       setViajes(prev => prev.map(v => v.nro_spot === s.nro_spot ? { ...v, [s.campo]: s.valor_propuesto, estado_observacion_transporte: "SIN_OBSERVACION" } : v));
+      setAprobarModal(null);
     } catch (err) {
       alert("Error al aprobar la solicitud: " + (err.message || ""));
+    } finally {
+      setAprobarSaving(false);
     }
   }
 
@@ -982,7 +988,7 @@ export default function App() {
     "No realizados":     q => q.eq("realizado", "NO"),
     "Pendiente escaneo": q => q.eq("realizado", "SI").is("foto_url", null).eq("estado_final", "PENDIENTE"),
     "Observado IA":      q => q.eq("realizado", "SI").eq("estado_final", "OBSERVADO"),
-    "Observado Transporte": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_observacion_transporte", "PENDIENTE"),
+    "Observado TRANSP.": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_observacion_transporte", "PENDIENTE"),
     "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_observacion_transporte", "PENDIENTE"),
   };
 
@@ -1623,7 +1629,7 @@ export default function App() {
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
                     { label: "Pendiente escaneo", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
                     { label: "Observado IA", val: kpis.cascada_observado || 0, color: "#e00000" },
-                    { label: "Observado Transporte", val: kpis.cascada_observado_transporte || 0, color: "#c00000" },
+                    { label: "Observado TRANSP.", val: kpis.cascada_observado_transporte || 0, color: "#c00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado, landing: base };
@@ -1708,7 +1714,7 @@ export default function App() {
                   );
                 })()}
                 {(() => {
-                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Observado Transporte", "Listos para migrar"];
+                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Observado TRANSP.", "Listos para migrar"];
                   return (
                     <div style={{ display: "flex", marginLeft: 32 }}>
                       {barrasLabels.map(l => (
@@ -2023,7 +2029,7 @@ export default function App() {
                       <td style={{ padding: "9px 12px", color: GRAY_500, fontSize: 11 }}>{s.creado_en ? fmtFechaHora(s.creado_en) : "—"}</td>
                       <td style={{ padding: "9px 12px" }}>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button onClick={() => handleAprobarSolicitud(s)} title="Aprobar"
+                          <button onClick={() => setAprobarModal(s)} title="Aprobar"
                             style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GREEN}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="20 6 9 17 4 12"/>
@@ -2422,6 +2428,38 @@ export default function App() {
               <button onClick={handleValidarManual} disabled={validSaving}
                 style={{ padding: "7px 20px", background: validSaving ? GRAY_200 : BLUE, color: validSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: validSaving ? "default" : "pointer" }}>
                 {validSaving ? "Validando..." : "Sí"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aprobarModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && !aprobarSaving && setAprobarModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 38, height: 38, borderRadius: "50%", background: GREEN_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Aprobar observación</div>
+                <div style={{ fontSize: 12, color: GRAY_500 }}>
+                  Vas a cambiar <b style={{ color: GRAY_900 }}>{CAMPO_LABEL[aprobarModal.campo] || aprobarModal.campo}</b> del ticket{" "}
+                  <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{aprobarModal.nro_spot}</span> de{" "}
+                  <b style={{ color: GRAY_900 }}>{aprobarModal.valor_actual || "—"}</b> a{" "}
+                  <b style={{ color: GRAY_900 }}>{aprobarModal.valor_propuesto}</b>. Esta acción no se puede deshacer.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setAprobarModal(null)} disabled={aprobarSaving}
+                style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
+              <button onClick={() => handleAprobarSolicitud(aprobarModal)} disabled={aprobarSaving}
+                style={{ padding: "7px 20px", background: aprobarSaving ? GRAY_200 : GREEN, color: aprobarSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: aprobarSaving ? "default" : "pointer" }}>
+                {aprobarSaving ? "Aplicando..." : "Sí, aprobar"}
               </button>
             </div>
           </div>
