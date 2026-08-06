@@ -56,7 +56,7 @@ const COLS = [
   { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
-  { key: "estado_confirmacion_transporte", label: "Observación", width: 140 },
+  { key: "estado_confirmacion_transporte", label: "Confirmación de información", width: 170 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
   { key: "rutas",               label: "N° GR",                    width: 140, trunc: true, headerGroup: "transportista" },
   { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
@@ -1179,14 +1179,23 @@ export default function App() {
         .filter(key => enPilotoObservaciones || key !== "estado_confirmacion_transporte")
         .map(key => COLS.find(c => c.key === key)).filter(Boolean);
 
-  // Offsets de las columnas fijas (sticky), calculados en vez de hardcodeados,
-  // para que agregar/quitar una no descuadre a las demás. De derecha a
-  // izquierda: Subir/Doc.Adjunto (transporte) -> Foto -> Edit -> Confirmar
-  // (transporte, solo en piloto).
-  const W_UPLOAD = 44, W_FOTO = 44, W_EDIT = 36, W_CONFIRMAR = 36;
+  // Offsets de las columnas fijas (sticky). El ancho real de cada celda se
+  // FUERZA con width/minWidth/maxWidth (ver stickyCellStyle) para que nunca
+  // dependa de cuánto ocupe el contenido -- así el offset siempre cuadra
+  // exacto, sin importar el navegador o el zoom.
+  // De derecha a izquierda: Subir/Doc.Adjunto (transporte) -> Foto -> Edit -> Confirmar (transporte, solo en piloto).
+  const W_UPLOAD = 40, W_FOTO = 40, W_EDIT = 40, W_CONFIRMAR = 40;
   const rFoto = isAdmin ? 0 : W_UPLOAD;
   const rEdit = isAdmin ? W_FOTO : W_UPLOAD + W_FOTO;
   const rConfirmar = rEdit + W_EDIT;
+
+  const stickyCellStyle = (right, width, isHeader) => ({
+    padding: "4px 2px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`,
+    borderLeft: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", top: isHeader ? 0 : undefined,
+    right, width, minWidth: width, maxWidth: width, overflow: "hidden",
+    background: isHeader ? GRAY_50 : "white", zIndex: isHeader ? 4 : 2, textAlign: "center",
+    ...(isHeader ? { fontSize: 10, fontWeight: 500, color: GRAY_500, whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: ".03em" } : {}),
+  });
 
   return (
     <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
@@ -1399,10 +1408,10 @@ export default function App() {
                     {c.label} {tablaSortCol === c.key && (tablaSortDir === "desc" ? "▼" : "▲")}
                   </th>
                 ))}
-                {!isAdmin && enPilotoObservaciones && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: rConfirmar, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Obs.</th>}
-                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: rEdit, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
-                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: rFoto, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
-                {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. Adjunto</th>}
+                {!isAdmin && enPilotoObservaciones && <th style={stickyCellStyle(rConfirmar, W_CONFIRMAR, true)}>Obs.</th>}
+                <th style={stickyCellStyle(rEdit, W_EDIT, true)}>Edit</th>
+                <th style={stickyCellStyle(rFoto, W_FOTO, true)}>Foto</th>
+                {!isAdmin && <th style={stickyCellStyle(0, W_UPLOAD, true)} title="Doc. Adjunto">Doc.</th>}
               </tr>
             </thead>
             <tbody>
@@ -1481,7 +1490,7 @@ export default function App() {
                     })}
 
                     {!isAdmin && enPilotoObservaciones && (
-                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rConfirmar, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      <td style={stickyCellStyle(rConfirmar, W_CONFIRMAR)}>
                         {v.estado_final === "FINALIZADO" && (() => {
                           const ect = v.estado_confirmacion_transporte || "PENDIENTE";
                           const c = ect === "CONFIRMADO" ? GREEN : ect === "SOLICITUD_ENVIADA" ? BLUE : ect === "RECHAZADA" ? RED : AMBER;
@@ -1497,7 +1506,7 @@ export default function App() {
                       </td>
                     )}
 
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rEdit, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={stickyCellStyle(rEdit, W_EDIT)}>
                       {!isAdmin && (
                         <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
@@ -1517,7 +1526,7 @@ export default function App() {
                       )}
                     </td>
 
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={stickyCellStyle(rFoto, W_FOTO)}>
                       {completo && v.foto_url && (
                         <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
                           style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500, margin: "0 auto" }}>
@@ -1530,7 +1539,7 @@ export default function App() {
                     </td>
 
                     {!isAdmin && (
-                      <td style={{ padding: "8px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 0, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                      <td style={stickyCellStyle(0, W_UPLOAD)}>
                         <button onClick={() => openModal(v)}
                           style={{ width: 28, height: 28, borderRadius: "50%", border: `1.5px solid ${completo ? GREEN : GRAY_200}`, background: "white", color: completo ? GREEN : GRAY_500, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
                           {completo ? "✓" : "↑"}
