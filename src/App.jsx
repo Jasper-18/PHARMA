@@ -56,7 +56,7 @@ const COLS = [
   { key: "nro_spot",            label: "N° SPOT",                  width: 145, mono: true },
   { key: "fecha_carga",         label: "Fecha Servicio",           width: 118 },
   { key: "estado_final",        label: "Estado Final",             width: 150 },
-  { key: "estado_observacion_transporte", label: "Observación", width: 140 },
+  { key: "estado_confirmacion_transporte", label: "Observación", width: 140 },
   { key: "placa",               label: "N° Placa",                 width: 90,  mono: true,  headerGroup: "transportista" },
   { key: "rutas",               label: "N° GR",                    width: 140, trunc: true, headerGroup: "transportista" },
   { key: "texto_detectado_ia",  label: "Texto Detectado IA",       width: 200, trunc: true, headerGroup: "ia" },
@@ -82,11 +82,8 @@ const COLS = [
 ];
 
 const COLS_TRANSPORTISTA_PRINCIPAL = [
-  "nro_spot", "fecha_carga", "estado_final", "estado_observacion_transporte", "cd_origen", "cd_destino",
+  "nro_spot", "fecha_carga", "estado_final", "estado_confirmacion_transporte", "cd_origen", "cd_destino",
   "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
-];
-
-const COLS_TRANSPORTISTA_DETALLE = [
   "tipo_traslado", "cantidad", "requerimiento",
   "detalle_servicio", "realizado", "estado_doc", "fecha_entrega_doc",
 ];
@@ -301,7 +298,7 @@ export default function App() {
   const [modal,        setModal]        = useState(null);
   const [editModal,    setEditModal]    = useState(null);
   const [vista, setVista] = useState("tabla");
-  const [detalleModal, setDetalleModal] = useState(null);
+  const [confirmObsModal, setConfirmObsModal] = useState(null);
   const [dashProveedor, setDashProveedor] = useState("");
   
   // Asignamos D-1 por defecto al dashboard
@@ -352,6 +349,9 @@ export default function App() {
 
   // --- Observaciones del transporte (opt-out: por defecto todo pasa; el
   // transporte solo actúa si algo está mal) ---
+  const [confirmModal,  setConfirmModal]  = useState(null); // viaje a confirmar directo (transportista)
+  const [confirmSaving, setConfirmSaving] = useState(false);
+  const [confirmErr,    setConfirmErr]    = useState("");
   const [solicitudModal,  setSolicitudModal]  = useState(null); // viaje al que se le agrega una observación (transportista)
   const [solicitudCampo,  setSolicitudCampo]  = useState("importe"); // qué campo quiere corregir
   const [solicitudValor,  setSolicitudValor]  = useState("");
@@ -814,9 +814,24 @@ export default function App() {
     finally { setValidSaving(false); }
   }
 
+  // --- Transportista: confirmar la información del ticket tal cual está ---
+  async function handleConfirmarInformacion() {
+    if (!confirmModal) return;
+    setConfirmSaving(true); setConfirmErr("");
+    try {
+      const ahora = new Date().toISOString();
+      const payload = { fecha_confirmacion_transporte: ahora, estado_confirmacion_transporte: "CONFIRMADO" };
+      const { data, error } = await supabase.from("viajes").update(payload).eq("nro_spot", confirmModal.nro_spot).select().single();
+      if (error) throw error;
+      setViajes(prev => prev.map(v => v.nro_spot === confirmModal.nro_spot ? { ...v, ...data } : v));
+      setConfirmModal(null);
+    } catch (err) { setConfirmErr(err.message || "Error al confirmar."); }
+    finally { setConfirmSaving(false); }
+  }
+
   // --- Transportista: agregar una observación sobre un campo del ticket
-  // (queda pendiente de tu revisión; si no se agrega ninguna, el ticket migra
-  // solo -- modelo opt-out) ---
+  // (requiere acción explícita del transporte -- confirmar o proponer una
+  // corrección -- para que el ticket pueda migrar) ---
   async function handleSolicitarCorreccion() {
     if (!solicitudModal) return;
     if (!solicitudValor.trim()) { setSolicitudErr("Ingresa el valor propuesto."); return; }
@@ -839,7 +854,7 @@ export default function App() {
       if (error) throw error;
       // El trigger trg_solicitud_enviada ya deja esto en PENDIENTE en la BD;
       // se refleja localmente para no esperar un refetch completo.
-      setViajes(prev => prev.map(v => v.nro_spot === solicitudModal.nro_spot ? { ...v, estado_observacion_transporte: "PENDIENTE" } : v));
+      setViajes(prev => prev.map(v => v.nro_spot === solicitudModal.nro_spot ? { ...v, estado_confirmacion_transporte: "SOLICITUD_ENVIADA" } : v));
       setSolicitudModal(null); setSolicitudValor(""); setSolicitudMotivo("");
     } catch (err) { setSolicitudErr(err.message || "Error al enviar la observación."); }
     finally { setSolicitudSaving(false); }
@@ -884,14 +899,14 @@ export default function App() {
     setAprobarSaving(true);
     try {
       // El trigger trg_resolver_solicitud escribe el valor propuesto en el
-      // campo correcto (SQL dinámico, blindado con CHECK) y limpia la
-      // observación -- acá solo se cierra la solicitud.
+      // campo correcto (SQL dinámico, blindado con CHECK) y deja el ticket
+      // en CONFIRMADO -- acá solo se cierra la solicitud.
       const { error } = await supabase.from("solicitudes_correccion")
         .update({ estado: "APROBADA", revisado_por: session.user.email, revisado_en: new Date().toISOString() })
         .eq("id", s.id);
       if (error) throw error;
       setSolicitudesPendientes(prev => prev.filter(x => x.id !== s.id));
-      setViajes(prev => prev.map(v => v.nro_spot === s.nro_spot ? { ...v, [s.campo]: s.valor_propuesto, estado_observacion_transporte: "SIN_OBSERVACION" } : v));
+      setViajes(prev => prev.map(v => v.nro_spot === s.nro_spot ? { ...v, [s.campo]: s.valor_propuesto, estado_confirmacion_transporte: "CONFIRMADO" } : v));
       setAprobarModal(null);
     } catch (err) {
       alert("Error al aprobar la solicitud: " + (err.message || ""));
@@ -905,14 +920,14 @@ export default function App() {
     if (!rechazoMotivo.trim()) { setRechazoErr("Explica el motivo del rechazo."); return; }
     setRechazoSaving(true); setRechazoErr("");
     try {
-      // Rechazar = la observación queda descartada; el ticket vuelve directo
-      // a "sin observación" -- ya se gestionó con el transporte, no bloquea.
+      // Rechazar = la propuesta queda descartada; el ticket vuelve a quedar
+      // pendiente de que el transporte confirme o proponga otra corrección.
       const { error } = await supabase.from("solicitudes_correccion")
         .update({ estado: "RECHAZADA", revisado_por: session.user.email, revisado_en: new Date().toISOString(), motivo_rechazo: rechazoMotivo.trim() })
         .eq("id", rechazoModal.id);
       if (error) throw error;
       setSolicitudesPendientes(prev => prev.filter(x => x.id !== rechazoModal.id));
-      setViajes(prev => prev.map(v => v.nro_spot === rechazoModal.nro_spot ? { ...v, estado_observacion_transporte: "SIN_OBSERVACION" } : v));
+      setViajes(prev => prev.map(v => v.nro_spot === rechazoModal.nro_spot ? { ...v, estado_confirmacion_transporte: "RECHAZADA" } : v));
       setRechazoModal(null); setRechazoMotivo("");
     } catch (err) { setRechazoErr(err.message || "Error al rechazar."); }
     finally { setRechazoSaving(false); }
@@ -988,8 +1003,8 @@ export default function App() {
     "No realizados":     q => q.eq("realizado", "NO"),
     "Pendiente escaneo": q => q.eq("realizado", "SI").is("foto_url", null).eq("estado_final", "PENDIENTE"),
     "Observado IA":      q => q.eq("realizado", "SI").eq("estado_final", "OBSERVADO"),
-    "Observado TRANSP.": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_observacion_transporte", "PENDIENTE"),
-    "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_observacion_transporte", "PENDIENTE"),
+    "Pendiente Confirmación": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_confirmacion_transporte", "CONFIRMADO"),
+    "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_confirmacion_transporte", "CONFIRMADO"),
   };
 
   async function abrirDetalleCascada(categoria) {
@@ -1071,7 +1086,7 @@ export default function App() {
     setDashLoading(true);
     try {
       let q = supabase.from("viajes").select("*")
-        .eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_observacion_transporte", "PENDIENTE")
+        .eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_confirmacion_transporte", "CONFIRMADO")
         .order("fecha_carga", { ascending: true });
       if (dashProveedor) q = q.eq("proveedor", dashProveedor);
       if (dashDesde) q = q.gte("fecha_carga", dashDesde);
@@ -1161,9 +1176,17 @@ export default function App() {
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
     : COLS_TRANSPORTISTA_PRINCIPAL
-        .filter(key => enPilotoObservaciones || key !== "estado_observacion_transporte")
+        .filter(key => enPilotoObservaciones || key !== "estado_confirmacion_transporte")
         .map(key => COLS.find(c => c.key === key)).filter(Boolean);
-  const colsDetalleExtra = COLS_TRANSPORTISTA_DETALLE.map(key => COLS.find(c => c.key === key)).filter(Boolean);
+
+  // Offsets de las columnas fijas (sticky), calculados en vez de hardcodeados,
+  // para que agregar/quitar una no descuadre a las demás. De derecha a
+  // izquierda: Subir/Doc.Adjunto (transporte) -> Foto -> Edit -> Confirmar
+  // (transporte, solo en piloto).
+  const W_UPLOAD = 44, W_FOTO = 44, W_EDIT = 36, W_CONFIRMAR = 36;
+  const rFoto = isAdmin ? 0 : W_UPLOAD;
+  const rEdit = isAdmin ? W_FOTO : W_UPLOAD + W_FOTO;
+  const rConfirmar = rEdit + W_EDIT;
 
   return (
     <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
@@ -1376,9 +1399,9 @@ export default function App() {
                     {c.label} {tablaSortCol === c.key && (tablaSortDir === "desc" ? "▼" : "▲")}
                   </th>
                 ))}
-                {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 200, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Detalle</th>}
-                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 80 : 164, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
-                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: isAdmin ? 0 : 84, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
+                {!isAdmin && enPilotoObservaciones && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: rConfirmar, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Obs.</th>}
+                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: rEdit, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Edit</th>
+                <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: rFoto, zIndex: 4, borderLeft: `0.5px solid ${BORDER}`, textTransform: "uppercase", letterSpacing: ".03em" }}>Foto</th>
                 {!isAdmin && <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, background: GRAY_50, borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, whiteSpace: "nowrap", position: "sticky", top: 0, right: 0, zIndex: 4, textTransform: "uppercase", letterSpacing: ".03em", borderLeft: `0.5px solid ${BORDER}` }}>Doc. Adjunto</th>}
               </tr>
             </thead>
@@ -1403,13 +1426,17 @@ export default function App() {
                         content = ef
                           ? <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{ef}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (c.key === "estado_observacion_transporte") {
-                        // Solo tiene sentido mostrar esto una vez que Estado Final ya es FINALIZADO.
-                        // Modelo opt-out: sin observación = todo bien, no hace falta resaltarlo.
-                        if (v.estado_final !== "FINALIZADO" || v.estado_observacion_transporte !== "PENDIENTE") {
+                      } else if (c.key === "estado_confirmacion_transporte") {
+                        // Solo tiene sentido mostrar esto una vez que Estado Final ya es FINALIZADO --
+                        // antes de eso el transporte todavía no tiene nada que confirmar.
+                        if (v.estado_final !== "FINALIZADO") {
                           content = <span style={{ color: GRAY_200 }}>—</span>;
                         } else {
-                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: AMBER_LIGHT, color: AMBER, whiteSpace: "nowrap" }}>OBSERVADO</span>;
+                          const ect = v.estado_confirmacion_transporte || "PENDIENTE";
+                          const bg = ect === "CONFIRMADO" ? GREEN_LIGHT : ect === "SOLICITUD_ENVIADA" ? BLUE_LIGHT : ect === "RECHAZADA" ? RED_LIGHT : AMBER_LIGHT;
+                          const fg = ect === "CONFIRMADO" ? GREEN : ect === "SOLICITUD_ENVIADA" ? BLUE : ect === "RECHAZADA" ? RED_DARK : AMBER;
+                          const label = ect === "CONFIRMADO" ? "CONFIRMADO" : ect === "SOLICITUD_ENVIADA" ? "SOLICITUD ENVIADA" : ect === "RECHAZADA" ? "RECHAZADA" : "PENDIENTE";
+                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
                         }
                       } else if (["realizado","estado_doc","estado_procesamiento_ia"].includes(c.key)) {
                         content = v[c.key]
@@ -1453,16 +1480,24 @@ export default function App() {
                       );
                     })}
 
-                    {!isAdmin && (
-                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: 200, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
-                        <button onClick={() => setDetalleModal(v)} title="Ver detalle completo"
-                          style={{ padding: "5px 10px", borderRadius: 7, border: `1px solid ${BORDER}`, background: GRAY_50, cursor: "pointer", fontSize: 10, fontWeight: 500, color: GRAY_900 }}>
-                          Detalle
-                        </button>
+                    {!isAdmin && enPilotoObservaciones && (
+                      <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rConfirmar, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                        {v.estado_final === "FINALIZADO" && (() => {
+                          const ect = v.estado_confirmacion_transporte || "PENDIENTE";
+                          const c = ect === "CONFIRMADO" ? GREEN : ect === "SOLICITUD_ENVIADA" ? BLUE : ect === "RECHAZADA" ? RED : AMBER;
+                          return (
+                            <button onClick={() => setConfirmObsModal(v)} title="Confirmar u observar información"
+                              style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${c}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            </button>
+                          );
+                        })()}
                       </td>
                     )}
 
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 80 : 164, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rEdit, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {!isAdmin && (
                         <button onClick={() => openEditModal(v)} title="Editar Placa y Rutas"
                           style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${GRAY_900}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
@@ -1482,25 +1517,15 @@ export default function App() {
                       )}
                     </td>
 
-                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: isAdmin ? 0 : 84, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
+                    <td style={{ padding: "4px 6px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, verticalAlign: "middle", position: "sticky", right: rFoto, background: "white", borderLeft: `0.5px solid ${BORDER}`, zIndex: 2, textAlign: "center" }}>
                       {completo && v.foto_url && (
-                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                          <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
-                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                              <circle cx="12" cy="12" r="3"/>
-                            </svg>
-                          </button>
-                          <button onClick={() => descargarFoto(v.foto_url, v.foto_nombre)} title="Descargar foto"
-                            style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                              <polyline points="7 10 12 15 17 10"/>
-                              <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                          </button>
-                        </div>
+                        <button onClick={() => abrirFoto(v.foto_url)} title="Ver foto"
+                          style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500, margin: "0 auto" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                          </svg>
+                        </button>
                       )}
                     </td>
 
@@ -1629,7 +1654,7 @@ export default function App() {
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
                     { label: "Pendiente escaneo", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
                     { label: "Observado IA", val: kpis.cascada_observado || 0, color: "#e00000" },
-                    { label: "Observado TRANSP.", val: kpis.cascada_observado_transporte || 0, color: "#c00000" },
+                    { label: "Pendiente Confirmación", val: kpis.cascada_pendiente_confirmacion || 0, color: "#c00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado, landing: base };
@@ -1714,7 +1739,7 @@ export default function App() {
                   );
                 })()}
                 {(() => {
-                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Observado TRANSP.", "Listos para migrar"];
+                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Pendiente Confirmación", "Listos para migrar"];
                   return (
                     <div style={{ display: "flex", marginLeft: 32 }}>
                       {barrasLabels.map(l => (
@@ -2154,67 +2179,100 @@ export default function App() {
         </div>
       )}
 
-      {detalleModal && (
+      {confirmObsModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
-          onClick={e => e.target === e.currentTarget && setDetalleModal(null)}>
-          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+          onClick={e => e.target === e.currentTarget && setConfirmObsModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>Detalle del viaje</div>
-              <button onClick={() => setDetalleModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Confirmación de información</div>
+              <button onClick={() => setConfirmObsModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
-            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{detalleModal.nro_spot}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {colsDetalleExtra.map(c => {
-                let val = detalleModal[c.key];
-                if (c.key === "fecha_entrega_doc") {
-                  val = val ? fmtFechaHora(val) : "—";
-                } else if (c.key === "realizado" || c.key === "estado_doc") {
-                  val = val ? String(val).toUpperCase() : "—";
-                } else if (c.right) {
-                  val = (val === null || val === undefined || val === "") ? "—" : val;
-                } else if (val === null || val === undefined || val === "") {
-                  val = "—";
-                }
-                return (
-                  <div key={c.key}>
-                    <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3 }}>{c.label}</div>
-                    <div style={{ fontSize: 13, color: GRAY_900 }}>{val}</div>
-                  </div>
-                );
-              })}
-            </div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{confirmObsModal.nro_spot}</div>
 
-            {detalleModal.estado_final === "FINALIZADO" && enPilotoObservaciones && (
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: `0.5px solid ${BORDER}` }}>
-                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Observaciones</div>
+            {(!confirmObsModal.estado_confirmacion_transporte || confirmObsModal.estado_confirmacion_transporte === "PENDIENTE") && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 12, color: GRAY_500 }}>Revisa la información del ticket (Importe: S/ {confirmObsModal.importe ?? "—"}).</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { setConfirmModal(confirmObsModal); setConfirmErr(""); setConfirmObsModal(null); }}
+                    style={{ flex: 1, padding: "8px 0", background: GREEN, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                    ✓ Confirmar información
+                  </button>
+                  <button onClick={() => { setSolicitudModal(confirmObsModal); setSolicitudCampo("importe"); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); setConfirmObsModal(null); }}
+                    style={{ flex: 1, padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                    Agregar observación
+                  </button>
+                </div>
+              </div>
+            )}
 
-                {detalleModal.estado_observacion_transporte === "PENDIENTE" ? (
-                  <div style={{ padding: "10px 12px", background: AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: GRAY_900 }}>
-                    <div style={{ color: AMBER, fontWeight: 600, marginBottom: 4 }}>Esperando revisión</div>
-                    <div>Propusiste cambiar <strong>{CAMPO_LABEL[detalleModal.campo_propuesto_transporte] || detalleModal.campo_propuesto_transporte}</strong> a: <strong>{detalleModal.valor_propuesto_transporte}</strong></div>
-                    {detalleModal.motivo_observacion_transporte && (
-                      <div style={{ color: GRAY_500, marginTop: 2 }}>{detalleModal.motivo_observacion_transporte}</div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {detalleModal.motivo_rechazo_observacion && (
-                      <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK }}>
-                        Tu última observación fue rechazada: {detalleModal.motivo_rechazo_observacion}
-                      </div>
-                    )}
-                    <div style={{ fontSize: 12, color: GRAY_500 }}>Reporta aquí cualquier dato incorrecto del ticket (Importe, etc.).</div>
-                    <button onClick={() => { setSolicitudModal(detalleModal); setSolicitudCampo("importe"); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); }}
-                      style={{ padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
-                      Agregar observación
-                    </button>
-                  </div>
+            {confirmObsModal.estado_confirmacion_transporte === "CONFIRMADO" && (
+              <div style={{ padding: "8px 12px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN }}>
+                ✓ Confirmaste esta información{confirmObsModal.fecha_confirmacion_transporte ? ` el ${fmtFechaHora(confirmObsModal.fecha_confirmacion_transporte)}` : ""}.
+              </div>
+            )}
+
+            {confirmObsModal.estado_confirmacion_transporte === "SOLICITUD_ENVIADA" && (
+              <div style={{ padding: "10px 12px", background: BLUE_LIGHT, borderRadius: 8, fontSize: 12, color: GRAY_900 }}>
+                <div style={{ color: BLUE, fontWeight: 600, marginBottom: 4 }}>Esperando revisión</div>
+                <div>Propusiste cambiar <strong>{CAMPO_LABEL[confirmObsModal.campo_propuesto_transporte] || confirmObsModal.campo_propuesto_transporte}</strong> a: <strong>{confirmObsModal.valor_propuesto_transporte}</strong></div>
+                {confirmObsModal.motivo_observacion_transporte && (
+                  <div style={{ color: GRAY_500, marginTop: 2 }}>{confirmObsModal.motivo_observacion_transporte}</div>
                 )}
               </div>
             )}
 
+            {confirmObsModal.estado_confirmacion_transporte === "RECHAZADA" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ padding: "10px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 12 }}>
+                  <div style={{ color: RED_DARK, fontWeight: 600, marginBottom: 4 }}>Tu solicitud fue rechazada</div>
+                  <div style={{ color: GRAY_900 }}>{confirmObsModal.motivo_rechazo_observacion}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { setConfirmModal(confirmObsModal); setConfirmErr(""); setConfirmObsModal(null); }}
+                    style={{ flex: 1, padding: "8px 0", background: GREEN, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                    ✓ Confirmar información
+                  </button>
+                  <button onClick={() => { setSolicitudModal(confirmObsModal); setSolicitudCampo("importe"); setSolicitudValor(""); setSolicitudMotivo(""); setSolicitudErr(""); setConfirmObsModal(null); }}
+                    style={{ flex: 1, padding: "8px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                    Volver a solicitar
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
-              <button onClick={() => setDetalleModal(null)} style={{ padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>Cerrar</button>
+              <button onClick={() => setConfirmObsModal(null)} style={{ padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && !confirmSaving && setConfirmModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 38, height: 38, borderRadius: "50%", background: GREEN_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Confirmar información</div>
+                <div style={{ fontSize: 12, color: GRAY_500 }}>
+                  ¿Confirmas que la información (Importe: S/ {confirmModal.importe ?? "—"}) del viaje{" "}
+                  <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{confirmModal.nro_spot}</span> es correcta?
+                </div>
+              </div>
+            </div>
+            {confirmErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 12 }}>⚠ {confirmErr}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setConfirmModal(null)} disabled={confirmSaving}
+                style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
+              <button onClick={handleConfirmarInformacion} disabled={confirmSaving}
+                style={{ padding: "7px 20px", background: confirmSaving ? GRAY_200 : GREEN, color: confirmSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: confirmSaving ? "default" : "pointer" }}>
+                {confirmSaving ? "Confirmando..." : "Sí, confirmar"}
+              </button>
             </div>
           </div>
         </div>
