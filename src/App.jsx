@@ -1390,10 +1390,10 @@ export default function App() {
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, tableLayout: "fixed" }}>
             <colgroup>
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
-              {!isAdmin && <col style={{ width: 74 }} />}
-              <col style={{ width: 36 }} />
-              <col style={{ width: 80 }} />
-              {!isAdmin && <col style={{ width: 84 }} />}
+              {!isAdmin && enPilotoObservaciones && <col style={{ width: W_CONFIRMAR }} />}
+              <col style={{ width: W_EDIT }} />
+              <col style={{ width: W_FOTO }} />
+              {!isAdmin && <col style={{ width: W_UPLOAD }} />}
             </colgroup>
             <thead>
               <tr>
