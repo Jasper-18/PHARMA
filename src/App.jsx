@@ -45,10 +45,9 @@ const CAMPOS_OBSERVABLES = [
 ];
 const CAMPO_LABEL = Object.fromEntries(CAMPOS_OBSERVABLES.map(c => [c.key, c.label]));
 
-// TEMPORAL: la función de observaciones está en piloto solo con RANSA (ya no
-// opera, así que sus tickets sirven para probar sin afectar transportistas
-// activos). Cuando el equipo la valide para todos, cambiar a null.
-const PILOTO_OBSERVACIONES_PROVEEDOR = "RANSA";
+// Ya validado por el equipo -- disponible para todos los transportistas.
+// (antes estuvo en piloto solo con RANSA durante las pruebas)
+const PILOTO_OBSERVACIONES_PROVEEDOR = null;
 
 const COLS = [
   { key: "fecha_registro",      label: "Fecha Registro",           width: 118, adminOnly: true },
