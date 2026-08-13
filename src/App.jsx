@@ -1233,7 +1233,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
         {/* SIDEBAR */}
         {isAdmin && (
           <div style={{ width: 190, background: "white", borderRight: `0.5px solid ${BORDER}`, flexShrink: 0, display: "flex", flexDirection: "column", padding: "14px 10px" }}>
@@ -1281,7 +1281,7 @@ export default function App() {
           </div>
         )}
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
 
       {/* TOOLBAR */}
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -1384,8 +1384,8 @@ export default function App() {
 
       {/* TABLA */}
       {vista === "tabla" && (
-      <div style={{ flex: 1, padding: "14px 18px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ overflowX: "auto", overflowY: "auto", flex: 1, background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
+      <div style={{ flex: 1, padding: "14px 18px", overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ overflowX: "auto", overflowY: "auto", flex: 1, background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}`, minHeight: 0 }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, tableLayout: "fixed" }}>
             <colgroup>
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
@@ -1449,6 +1449,13 @@ export default function App() {
                       } else if (["realizado","estado_doc","estado_procesamiento_ia"].includes(c.key)) {
                         content = v[c.key]
                           ? <span style={{ fontSize: 11, color: GRAY_900 }}>{String(v[c.key]).toUpperCase()}</span>
+                          : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (c.key === "requerimiento") {
+                        // Quita el prefijo P/E/L (Programación/Ejecución/Liquidaciones) solo
+                        // para mostrar -- el valor real en Supabase no se toca.
+                        const limpio = v.requerimiento ? String(v.requerimiento).replace(/^[PEL]\/\s*/, "") : "";
+                        content = limpio
+                          ? <span>{limpio}</span>
                           : <span style={{ color: GRAY_200 }}>—</span>;
                       } else if (["rutas","placa","texto_detectado_ia"].includes(c.key)) {
                         // Documento 1/2/3 en líneas separadas dentro de la misma celda -- la data real
