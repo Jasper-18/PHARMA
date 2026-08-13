@@ -1197,7 +1197,7 @@ export default function App() {
   });
 
   return (
-    <div style={{ minHeight: "100vh", background: GRAY_100, display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100vh", overflow: "hidden", background: GRAY_100, display: "flex", flexDirection: "column" }}>
       <style>{`
         .viaje-row td { background: white; transition: background 0.08s; }
         .viaje-row:hover td { background: #FFF5F5; }
