@@ -318,6 +318,7 @@ export default function App() {
   const [dashLoading, setDashLoading] = useState(false);
   const [cascadaDetalleModal, setCascadaDetalleModal] = useState(null);
   const [rankingSortCol, setRankingSortCol] = useState(null);
+  const [horaActual, setHoraActual] = useState(new Date()); // sello de hora en vivo, para capturas de pantalla del corte
   const [tablaSortCol, setTablaSortCol] = useState(null);
   const [tablaSortDir, setTablaSortDir] = useState("asc");
   const [rankingSortDir, setRankingSortDir] = useState("desc");
@@ -379,6 +380,11 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const intervalo = setInterval(() => setHoraActual(new Date()), 30000);
+    return () => clearInterval(intervalo);
   }, []);
 
   useEffect(() => {
@@ -1002,7 +1008,7 @@ export default function App() {
     "No realizados":     q => q.eq("realizado", "NO"),
     "Pendiente escaneo": q => q.eq("realizado", "SI").is("foto_url", null).eq("estado_final", "PENDIENTE"),
     "Observado IA":      q => q.eq("realizado", "SI").eq("estado_final", "OBSERVADO"),
-    "Pendiente Confirmación": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_confirmacion_transporte", "CONFIRMADO"),
+    "Pendiente Validación": q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").neq("estado_confirmacion_transporte", "CONFIRMADO"),
     "Listos para migrar":q => q.eq("realizado", "SI").eq("estado_final", "FINALIZADO").eq("estado_confirmacion_transporte", "CONFIRMADO"),
   };
 
@@ -1669,7 +1675,7 @@ export default function App() {
                     { label: "No realizados", val: kpis.cascada_no_realizados || 0, color: "#ff4040" },
                     { label: "Pendiente escaneo", val: kpis.cascada_pendiente_subir || 0, color: "#ff0000" },
                     { label: "Observado IA", val: kpis.cascada_observado || 0, color: "#e00000" },
-                    { label: "Pendiente Confirmación", val: kpis.cascada_pendiente_confirmacion || 0, color: "#c00000" },
+                    { label: "Pendiente Validación", val: kpis.cascada_pendiente_confirmacion || 0, color: "#c00000" },
                   ].map(r => {
                     const base = acumulado - r.val;
                     const barra = { ...r, base, tope: acumulado, landing: base };
@@ -1699,7 +1705,7 @@ export default function App() {
 
                   const N = barras.length;
                   const colPct = 100 / N;
-                  const margenPct = colPct * 0.14;
+                  const margenPct = colPct * 0.06;
 
                   return (
                     <div style={{ display: "flex" }}>
@@ -1754,11 +1760,21 @@ export default function App() {
                   );
                 })()}
                 {(() => {
-                  const barrasLabels = ["Total tickets", "No confirmados", "No realizados", "Pendiente escaneo", "Observado IA", "Pendiente Confirmación", "Listos para migrar"];
+                  const barrasLabels = [
+                    ["Total tickets"],
+                    ["No confirmados", "(Ejecución)"],
+                    ["No realizados"],
+                    ["Pendiente escaneo"],
+                    ["Observado IA"],
+                    ["Pendiente Validación", "(Transportista)"],
+                    ["Listos para migrar"],
+                  ];
                   return (
                     <div style={{ display: "flex", marginLeft: 32 }}>
-                      {barrasLabels.map(l => (
-                        <div key={l} style={{ flex: 1, fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 8, lineHeight: 1.3 }}>{l}</div>
+                      {barrasLabels.map((lineas, i) => (
+                        <div key={i} style={{ flex: 1, fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 8, lineHeight: 1.3 }}>
+                          {lineas.map((linea, j) => <div key={j}>{linea}</div>)}
+                        </div>
                       ))}
                     </div>
                   );
@@ -1769,7 +1785,12 @@ export default function App() {
 
           {/* Ranking por transportista */}
           <div style={{ marginBottom: 28 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 10 }}>Ranking por transportista</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900 }}>Ranking por transportista</div>
+              <div title="Hora del corte -- se actualiza sola" style={{ fontSize: 11, color: GRAY_500, background: GRAY_50, border: `0.5px solid ${BORDER}`, borderRadius: 8, padding: "4px 10px" }}>
+                Corte: <span style={{ fontWeight: 600, color: GRAY_900 }}>{fmtFechaHora(horaActual)}</span>
+              </div>
+            </div>
             <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
@@ -1778,7 +1799,7 @@ export default function App() {
                       { h: "Proveedor", k: "proveedor" },
                       { h: "Tickets Realizados", k: "total" },
                       { h: "Pend. Escaneo Guía", k: "pendiente_subir" },
-                      { h: "Observado IA", k: "observado" },
+                      { h: "Pendiente Validación", k: "observado" },
                       { h: "Listos para migrar", k: "listos_migrar" },
                       { h: "% Avance de cumplimiento", k: "pct_avance" },
                     ].map(({ h, k }, i, arr) => (
