@@ -1784,8 +1784,8 @@ export default function App() {
           )}
 
           {/* Ranking por transportista */}
-          <div style={{ marginBottom: 28 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
+          <div style={{ marginBottom: 28, display: "inline-block" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900 }}>Ranking por transportista</div>
               <div title="Hora del corte -- se actualiza sola" style={{ fontSize: 11, color: GRAY_500, background: GRAY_50, border: `0.5px solid ${BORDER}`, borderRadius: 8, padding: "4px 10px" }}>
                 Corte: <span style={{ fontWeight: 600, color: GRAY_900 }}>{fmtFechaHora(horaActual)}</span>
