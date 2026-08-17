@@ -1792,7 +1792,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: GRAY_50 }}>
                     {[
@@ -1806,7 +1806,7 @@ export default function App() {
                       <th key={h} onClick={() => {
                         if (rankingSortCol === k) setRankingSortDir(d => d === "desc" ? "asc" : "desc");
                         else { setRankingSortCol(k); setRankingSortDir("desc"); }
-                      }} style={{ padding: "8px 10px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}`, borderRight: i < arr.length - 1 ? `0.5px solid ${BORDER}` : "none", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                      }} style={{ padding: "8px 8px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}`, borderRight: i < arr.length - 1 ? `0.5px solid ${BORDER}` : "none", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
                         {h} {rankingSortCol === k && (rankingSortDir === "desc" ? "▼" : "▲")}
                       </th>
                     ))}
@@ -1828,12 +1828,12 @@ export default function App() {
                     const bgAvance = avance >= 70 ? GREEN_LIGHT : avance >= 40 ? AMBER_LIGHT : RED_LIGHT;
                     return (
                       <tr key={r.proveedor || "sin-proveedor"}>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.proveedor ? GRAY_900 : GRAY_500, fontStyle: r.proveedor ? "normal" : "italic" }}>{r.proveedor || "FALTA ASIGNAR"}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.total}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.pendiente_subir}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.pendiente_validacion > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validacion}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}` }}>
+                        <td style={{ padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.proveedor ? GRAY_900 : GRAY_500, fontStyle: r.proveedor ? "normal" : "italic" }}>{r.proveedor || "FALTA ASIGNAR"}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.total}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.pendiente_subir > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_subir}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.pendiente_validacion > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validacion}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}` }}>
                           <span style={{ display: "inline-flex", padding: "2px 10px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bgAvance, color: colorAvance }}>{avance}%</span>
                         </td>
                       </tr>
