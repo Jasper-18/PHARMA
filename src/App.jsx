@@ -1799,8 +1799,8 @@ export default function App() {
                       { h: "Proveedor", k: "proveedor" },
                       { h: "Tickets Realizados", k: "total" },
                       { h: "Pend. Escaneo Guía", k: "pendiente_subir" },
-                      { h: "Pendiente Validación", k: "observado" },
-                      { h: "Listos para migrar", k: "listos_migrar" },
+                      { h: "Pendiente Validación", k: "pendiente_validacion" },
+                      { h: "Listos para migrar (Pref)", k: "listos_migrar" },
                       { h: "% Avance de cumplimiento", k: "pct_avance" },
                     ].map(({ h, k }, i, arr) => (
                       <th key={h} onClick={() => {
@@ -1831,7 +1831,7 @@ export default function App() {
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.proveedor ? GRAY_900 : GRAY_500, fontStyle: r.proveedor ? "normal" : "italic" }}>{r.proveedor || "FALTA ASIGNAR"}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.total}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` }}>{r.pendiente_subir}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.observado > 0 ? RED_DARK : GRAY_900 }}>{r.observado}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: r.pendiente_validacion > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente_validacion}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`, color: GREEN }}>{r.listos_migrar}</td>
                         <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}` }}>
                           <span style={{ display: "inline-flex", padding: "2px 10px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bgAvance, color: colorAvance }}>{avance}%</span>
