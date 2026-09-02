@@ -95,10 +95,20 @@ function extraerCandidatosImporte(texto) {
 // es una tolerancia de negocio.
 function compararImporteExacto(importeCol, textoOcr) {
   const importeNum = parseFloat(String(importeCol ?? "").replace(/,/g, ""));
-  if (isNaN(importeNum)) return { coincide: false, importeNum: null };
   const candidatos = extraerCandidatosImporte(textoOcr);
+  if (isNaN(importeNum)) {
+    const importeDetectado = candidatos.length ? Math.max(...candidatos) : null;
+    return { coincide: false, importeNum: null, importeDetectado };
+  }
   const coincide = candidatos.some(c => Math.abs(c - importeNum) < 0.005);
-  return { coincide, importeNum };
+  // Si coincide, mostramos el valor exacto que se encontró (el mismo Importe
+  // del ticket). Si no, mostramos el candidato más alto del documento como
+  // mejor estimado -- útil para juzgar rápido, pero no es "la verdad"
+  // garantizada; para eso está el ojo que abre la imagen real.
+  const importeDetectado = coincide
+    ? importeNum
+    : (candidatos.length ? Math.max(...candidatos) : null);
+  return { coincide, importeNum, importeDetectado };
 }
 
 async function procesarCotizacion(supabase, nro_spot) {
@@ -144,6 +154,7 @@ async function procesarCotizacion(supabase, nro_spot) {
     const payload = {
       estado_procesamiento_cotizacion: "PROCESADO",
       estado_validacion_cotizacion: match.coincide ? "COINCIDE" : "NO_COINCIDE",
+      importe_detectado_cotizacion: match.importeDetectado != null ? match.importeDetectado.toFixed(2) : null,
       // Se guarda el texto completo (acotado a 3000 caracteres) -- acá no hay
       // una "ventana" puntual como en el GR, porque no buscamos un número
       // conocido de antemano dentro del texto, sino que extraemos candidatos.
@@ -159,6 +170,7 @@ async function procesarCotizacion(supabase, nro_spot) {
     await supabase.from("viajes").update({
       estado_procesamiento_cotizacion: "ERROR",
       estado_validacion_cotizacion: null,
+      importe_detectado_cotizacion: null,
       texto_detectado_cotizacion: null,
     }).eq("nro_spot", nro_spot);
 
