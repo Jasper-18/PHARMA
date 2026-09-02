@@ -90,7 +90,6 @@ const COLS = [
   { key: "realizado",           label: "Realizado",                width: 80 },
   { key: "estado_procesamiento_ia", label: "Procesam. IA",         width: 100, headerGroup: "ia", adminOnly: true },
   { key: "estado_validacion_ia",label: "Validación IA",            width: 110, headerGroup: "ia" },
-  { key: "estado_validacion_cotizacion", label: "Cotización",       width: 100 },
   { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia" },
   { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
@@ -100,7 +99,7 @@ const COLS = [
 
 const COLS_TRANSPORTISTA_PRINCIPAL = [
   "nro_spot", "fecha_carga", "estado_final", "estado_confirmacion_transporte", "cd_origen", "cd_destino",
-  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia", "estado_validacion_cotizacion",
+  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
   "tipo_traslado", "cantidad", "requerimiento",
   "detalle_servicio", "realizado", "estado_doc", "fecha_entrega_doc",
 ];
@@ -1282,23 +1281,35 @@ export default function App() {
   );
 
   const enPilotoObservaciones = !PILOTO_OBSERVACIONES_PROVEEDOR || empresa === PILOTO_OBSERVACIONES_PROVEEDOR;
-  const enPilotoCotizacion = !PILOTO_COTIZACION_PROVEEDOR || empresa === PILOTO_COTIZACION_PROVEEDOR;
+  const enPilotoCotizacion = isAdmin || !PILOTO_COTIZACION_PROVEEDOR || empresa === PILOTO_COTIZACION_PROVEEDOR;
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
     : COLS_TRANSPORTISTA_PRINCIPAL
         .filter(key => enPilotoObservaciones || key !== "estado_confirmacion_transporte")
-        .filter(key => enPilotoCotizacion || key !== "estado_validacion_cotizacion")
         .map(key => COLS.find(c => c.key === key)).filter(Boolean);
 
   // Offsets de las columnas fijas (sticky). El ancho real de cada celda se
   // FUERZA con width/minWidth/maxWidth (ver stickyCellStyle) para que nunca
   // dependa de cuánto ocupe el contenido -- así el offset siempre cuadra
   // exacto, sin importar el navegador o el zoom.
-  // De derecha a izquierda: Subir/Doc.Adjunto (transporte) -> Foto -> Edit -> Confirmar (transporte, solo en piloto).
-  const W_UPLOAD = 40, W_FOTO = 40, W_EDIT = 40, W_CONFIRMAR = 40;
-  const rFoto = isAdmin ? 0 : W_UPLOAD;
-  const rEdit = isAdmin ? W_FOTO : W_UPLOAD + W_FOTO;
-  const rConfirmar = rEdit + W_EDIT;
+  //
+  // Los offsets se calculan con una LISTA (de derecha a izquierda), no a mano
+  // uno por uno -- así, si se agrega o quita una columna condicional (piloto,
+  // rol), las demás se recalculan solas sin tener que sumar de nuevo.
+  const W_UPLOAD = 40, W_FOTO = 40, W_EDIT = 40, W_CONFIRMAR = 40, W_COTIZACION = 40;
+  const stickyDef = [];
+  if (!isAdmin) stickyDef.push(["upload", W_UPLOAD]);
+  stickyDef.push(["foto", W_FOTO]);
+  stickyDef.push(["edit", W_EDIT]);
+  if (!isAdmin && enPilotoObservaciones) stickyDef.push(["confirmar", W_CONFIRMAR]);
+  if (enPilotoCotizacion) stickyDef.push(["cotizacion", W_COTIZACION]);
+
+  const stickyRight = {};
+  { let acumulado = 0; for (const [key, width] of stickyDef) { stickyRight[key] = acumulado; acumulado += width; } }
+  const rFoto = stickyRight.foto;
+  const rEdit = stickyRight.edit;
+  const rConfirmar = stickyRight.confirmar;
+  const rCotizacionCol = stickyRight.cotizacion;
 
   const stickyCellStyle = (right, width, isHeader) => ({
     padding: "4px 2px", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}`,
@@ -1501,6 +1512,7 @@ export default function App() {
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, tableLayout: "fixed" }}>
             <colgroup>
               {colsVisibles.map(c => <col key={c.key} style={{ width: c.width || 100 }} />)}
+              {enPilotoCotizacion && <col style={{ width: W_COTIZACION }} />}
               {!isAdmin && enPilotoObservaciones && <col style={{ width: W_CONFIRMAR }} />}
               <col style={{ width: W_EDIT }} />
               <col style={{ width: W_FOTO }} />
@@ -1519,6 +1531,7 @@ export default function App() {
                     {c.label} {tablaSortCol === c.key && (tablaSortDir === "desc" ? "▼" : "▲")}
                   </th>
                 ))}
+                {enPilotoCotizacion && <th style={stickyCellStyle(rCotizacionCol, W_COTIZACION, true)}>Cotiz.</th>}
                 {!isAdmin && enPilotoObservaciones && <th style={stickyCellStyle(rConfirmar, W_CONFIRMAR, true)}>Obs.</th>}
                 <th style={stickyCellStyle(rEdit, W_EDIT, true)}>Edit</th>
                 <th style={stickyCellStyle(rFoto, W_FOTO, true)}>Foto</th>
@@ -1578,23 +1591,6 @@ export default function App() {
                               {partes.map((p, i) => <span key={i} style={i === 0 ? { fontFamily: c.mono ? "monospace" : "inherit" } : { fontSize: 10, color: GRAY_500, fontFamily: c.mono ? "monospace" : "inherit" }}>{p}</span>)}
                             </div>
                           : <span style={{ color: GRAY_200 }}>—</span>;
-                      } else if (c.key === "estado_validacion_cotizacion") {
-                        // Solo aplica al requerimiento con candado de cotización -- para
-                        // cualquier otro ticket, no hay nada que mostrar acá.
-                        if (!esRequerimientoCotizacion(v.requerimiento)) {
-                          content = <span style={{ color: GRAY_200 }}>—</span>;
-                        } else {
-                          const ec = v.estado_validacion_cotizacion;
-                          const bg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN_LIGHT : ec === "NO_COINCIDE" ? RED_LIGHT : AMBER_LIGHT;
-                          const fg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN : ec === "NO_COINCIDE" ? RED_DARK : AMBER;
-                          const label = ec ? String(ec).toUpperCase() : "PENDIENTE";
-                          content = (
-                            <span onClick={() => setCotizacionDetalleModal(v)} title="Ver detalle de la cotización"
-                              style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap", cursor: "pointer" }}>
-                              {label}
-                            </span>
-                          );
-                        }
                       } else if (c.key === "estado_validacion_ia") {
                         const partes = [v.estado_validacion_ia, v.estado_validacion_ia_2, v.estado_validacion_ia_3].filter(Boolean).map(s => String(s).toUpperCase());
                         content = partes.length
@@ -1623,6 +1619,24 @@ export default function App() {
                         </td>
                       );
                     })}
+
+                    {enPilotoCotizacion && (
+                      <td style={stickyCellStyle(rCotizacionCol, W_COTIZACION)}>
+                        {esRequerimientoCotizacion(v.requerimiento) && (() => {
+                          const ec = v.estado_validacion_cotizacion;
+                          const c = ec === "COINCIDE" || ec === "MANUAL" ? GREEN : ec === "NO_COINCIDE" ? RED : AMBER;
+                          return (
+                            <button onClick={() => setCotizacionDetalleModal(v)} title="Ver detalle de la cotización"
+                              style={{ width: 28, height: 28, borderRadius: 7, border: `1.5px solid ${c}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", padding: 0 }}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                            </button>
+                          );
+                        })()}
+                      </td>
+                    )}
 
                     {!isAdmin && enPilotoObservaciones && (
                       <td style={stickyCellStyle(rConfirmar, W_CONFIRMAR)}>
