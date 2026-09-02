@@ -28,6 +28,16 @@ const MAX_MB = 10;
 // y alimentan el gráfico de barras del Panel Técnico. Se puede ampliar esta
 // lista más adelante sin romper lo ya registrado (los valores viejos siguen
 // contando igual en el gráfico, con su propio nombre).
+// Único requerimiento que exige subir además la cotización de flete (candado
+// de importe exacto). Si el string en Supabase cambia, actualizar acá.
+const REQUERIMIENTO_COTIZACION = "P/OLT DESPACHO PROVINCIA";
+
+// TEMPORAL: el candado de cotización está en piloto solo con RANSA, para
+// probar antes de exigirlo a todos los transportistas con este requerimiento.
+// Cuando el equipo lo valide, cambiar a null -- Y quitar el mismo filtro por
+// proveedor en el trigger SQL actualizar_estado_final (ver comentarios ahí).
+const PILOTO_COTIZACION_PROVEEDOR = "RANSA";
+
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
@@ -73,6 +83,7 @@ const COLS = [
   { key: "realizado",           label: "Realizado",                width: 80 },
   { key: "estado_procesamiento_ia", label: "Procesam. IA",         width: 100, headerGroup: "ia", adminOnly: true },
   { key: "estado_validacion_ia",label: "Validación IA",            width: 110, headerGroup: "ia" },
+  { key: "estado_validacion_cotizacion", label: "Cotización",       width: 100 },
   { key: "match_ia",            label: "Match IA",                 width: 70,  right: true, headerGroup: "ia" },
   { key: "usuario_modif",       label: "Usuario Modif.",           width: 140, muted: true, headerGroup: "ia" },
   { key: "fecha_modif",         label: "Fecha Modif.",             width: 130, muted: true, headerGroup: "ia" },
@@ -82,7 +93,7 @@ const COLS = [
 
 const COLS_TRANSPORTISTA_PRINCIPAL = [
   "nro_spot", "fecha_carga", "estado_final", "estado_confirmacion_transporte", "cd_origen", "cd_destino",
-  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia",
+  "importe", "placa", "rutas", "texto_detectado_ia", "estado_validacion_ia", "estado_validacion_cotizacion",
   "tipo_traslado", "cantidad", "requerimiento",
   "detalle_servicio", "realizado", "estado_doc", "fecha_entrega_doc",
 ];
@@ -372,6 +383,7 @@ export default function App() {
   const fileRef1   = useRef();
   const fileRef2   = useRef();
   const fileRef3   = useRef();
+  const fileRefCotizacion = useRef();
   const fileRefFor = (d) => d === 1 ? fileRef1 : d === 2 ? fileRef2 : fileRef3;
   const userMenuRef= useRef();
   const fetchViajesRef = useRef(null);
@@ -705,6 +717,88 @@ export default function App() {
     return [1, viaje?.placa_2 ? 2 : null, viaje?.placa_3 ? 3 : null].filter(Boolean);
   }
 
+  // --- Cotización de flete (candado de importe exacto, requerimiento puntual) ---
+  function grEstaCompleto(viaje) {
+    return docsDeclarados(viaje).every(d => {
+      const suf = SUF(d);
+      const st = viaje[`estado_validacion_ia${suf}`];
+      return st === "COINCIDE" || st === "MANUAL";
+    });
+  }
+  function cotizacionEstaCompleta(viaje) {
+    if (viaje?.requerimiento !== REQUERIMIENTO_COTIZACION) return true; // no aplica a este ticket
+    return ["COINCIDE", "MANUAL"].includes(viaje?.estado_validacion_cotizacion);
+  }
+
+  async function handleUploadCotizacion() {
+    const st = docState("cotizacion");
+    if (!st.file || !modal) return;
+    setDocState("cotizacion", { uploading: true, err: "" });
+    try {
+      const compressed = await comprimirImagen(st.file);
+      const versiones  = modal.foto_versiones_cotizacion || [];
+      const nv  = versiones.length + 1;
+      const ext = compressed.name.split(".").pop();
+      const nroCorto = extraerNroSpotCorto(modal.nro_spot);
+      const fileName = `${nroCorto}_cotizacion_v${nv}.${ext}`;
+      const path = `${modal.proveedor}/${modal.nro_spot}/${fileName}`;
+      const { error: upErr } = await supabase.storage.from("documentos").upload(path, compressed, { upsert: true });
+      if (upErr) throw upErr;
+
+      const nuevasVersiones = [...versiones, { v: nv, path, nombre: fileName, subido_por: session.user.email, subido_en: new Date().toISOString() }];
+      const ahora = new Date().toISOString();
+      const payload = {
+        foto_versiones_cotizacion: nuevasVersiones,
+        foto_cotizacion: path,
+        estado_procesamiento_cotizacion: null,
+        fecha_entrega_cotizacion: versiones.length === 0 ? ahora : modal.fecha_entrega_cotizacion,
+      };
+      const { error: dbErr } = await supabase.from("viajes").update(payload).eq("nro_spot", modal.nro_spot);
+      if (dbErr) throw dbErr;
+
+      setDocState("cotizacion", { uploading: false, validando: true });
+      setModal(prev => ({ ...prev, ...payload }));
+
+      let resultado = null;
+      try {
+        const resp = await fetch("/api/procesar-ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nro_spot: modal.nro_spot, documento: "cotizacion" }),
+        });
+        if (resp.ok) resultado = await resp.json();
+      } catch { }
+
+      let resPayload = {};
+      if (resultado) {
+        resPayload = {
+          estado_procesamiento_cotizacion: resultado.estado_procesamiento_cotizacion,
+          estado_validacion_cotizacion: resultado.estado_validacion_cotizacion,
+          texto_detectado_cotizacion: resultado.texto_detectado_cotizacion,
+        };
+        setModal(prev => ({ ...prev, ...resPayload }));
+      }
+
+      setDocState("cotizacion", { validando: false, resultado, success: true });
+      setViajes(prev => prev.map(v => v.nro_spot === modal.nro_spot ? { ...v, ...payload, ...resPayload } : v));
+      fetchViajes();
+
+      const cierraSolo = !resultado || resultado.estado_validacion_cotizacion !== "NO_COINCIDE";
+      if (cierraSolo) {
+        setTimeout(() => {
+          // Solo cierra si además el GR ya está completo -- si todavía falta
+          // el GR, dejamos el modal abierto para que lo suba también.
+          if (grEstaCompleto(modal)) {
+            setModal(null);
+          }
+          setDocState("cotizacion", { success: false, resultado: null, file: null });
+        }, 2200);
+      }
+    } catch (err) {
+      setDocState("cotizacion", { err: err.message || "Error al subir el archivo.", uploading: false });
+    }
+  }
+
   function openModal(viaje) {
     const faltaPlaca = !viaje.placa || viaje.placa.trim() === "";
     const faltaRutas = !viaje.rutas || viaje.rutas.trim() === "";
@@ -787,7 +881,8 @@ export default function App() {
       const cierraSolo = !resultado || resultado.estado_validacion_ia !== "NO_COINCIDE";
       if (cierraSolo) {
         setTimeout(() => {
-          if (docsDeclarados(modal).length === 1) {
+          // No cierra si este ticket exige cotización y todavía no está completa.
+          if (docsDeclarados(modal).length === 1 && cotizacionEstaCompleta(modal)) {
             setModal(null);
           }
           setDocState(docIndex, { success: false, resultado: null, file: null });
@@ -810,6 +905,7 @@ export default function App() {
       const payload = { estado_validacion_ia: "MANUAL", usuario_modif: session.user.email, fecha_modif: ahora, motivo_validacion: motivoValidacion };
       if (validModal.placa_2) payload.estado_validacion_ia_2 = "MANUAL";
       if (validModal.placa_3) payload.estado_validacion_ia_3 = "MANUAL";
+      if (validModal.requerimiento === REQUERIMIENTO_COTIZACION) payload.estado_validacion_cotizacion = "MANUAL";
 
       const { data, error } = await supabase.from("viajes").update(payload).eq("nro_spot", validModal.nro_spot).select().single();
       if (error) throw error;
@@ -1178,10 +1274,12 @@ export default function App() {
   );
 
   const enPilotoObservaciones = !PILOTO_OBSERVACIONES_PROVEEDOR || empresa === PILOTO_OBSERVACIONES_PROVEEDOR;
+  const enPilotoCotizacion = !PILOTO_COTIZACION_PROVEEDOR || empresa === PILOTO_COTIZACION_PROVEEDOR;
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
     : COLS_TRANSPORTISTA_PRINCIPAL
         .filter(key => enPilotoObservaciones || key !== "estado_confirmacion_transporte")
+        .filter(key => enPilotoCotizacion || key !== "estado_validacion_cotizacion")
         .map(key => COLS.find(c => c.key === key)).filter(Boolean);
 
   // Offsets de las columnas fijas (sticky). El ancho real de cada celda se
@@ -1472,6 +1570,18 @@ export default function App() {
                               {partes.map((p, i) => <span key={i} style={i === 0 ? { fontFamily: c.mono ? "monospace" : "inherit" } : { fontSize: 10, color: GRAY_500, fontFamily: c.mono ? "monospace" : "inherit" }}>{p}</span>)}
                             </div>
                           : <span style={{ color: GRAY_200 }}>—</span>;
+                      } else if (c.key === "estado_validacion_cotizacion") {
+                        // Solo aplica al requerimiento con candado de cotización -- para
+                        // cualquier otro ticket, no hay nada que mostrar acá.
+                        if (v.requerimiento !== REQUERIMIENTO_COTIZACION) {
+                          content = <span style={{ color: GRAY_200 }}>—</span>;
+                        } else {
+                          const ec = v.estado_validacion_cotizacion;
+                          const bg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN_LIGHT : ec === "NO_COINCIDE" ? RED_LIGHT : AMBER_LIGHT;
+                          const fg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN : ec === "NO_COINCIDE" ? RED_DARK : AMBER;
+                          const label = ec ? String(ec).toUpperCase() : "PENDIENTE";
+                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
+                        }
                       } else if (c.key === "estado_validacion_ia") {
                         const partes = [v.estado_validacion_ia, v.estado_validacion_ia_2, v.estado_validacion_ia_3].filter(Boolean).map(s => String(s).toUpperCase());
                         content = partes.length
@@ -2700,6 +2810,82 @@ export default function App() {
                     </div>
                   );
                 })}
+
+                {modal.requerimiento === REQUERIMIENTO_COTIZACION && enPilotoCotizacion && (
+                  <div style={{ marginTop: 22, paddingTop: 20, borderTop: `0.5px solid ${BORDER}` }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: GRAY_900, marginBottom: 8 }}>Cotización de flete</div>
+
+                    {!modal.foto_url ? (
+                      <div style={{ padding: "12px 14px", background: GRAY_100, borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
+                        <div style={{ fontSize: 11, color: GRAY_500 }}>Primero sube la guía de este ticket para poder subir la cotización.</div>
+                      </div>
+                    ) : (() => {
+                      const stC = docState("cotizacion");
+                      return (
+                        <>
+                          {stC.success ? (
+                            <div style={{ textAlign: "center", padding: "16px 0" }}>
+                              {!stC.resultado ? (
+                                <>
+                                  <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+                                  <div style={{ fontSize: 12, color: GREEN, fontWeight: 500 }}>Cotización guardada correctamente</div>
+                                  <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>La validación automática se completará en breve.</div>
+                                </>
+                              ) : stC.resultado.estado_validacion_cotizacion === "COINCIDE" ? (
+                                <>
+                                  <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+                                  <div style={{ fontSize: 12, color: GREEN, fontWeight: 500 }}>El importe de la cotización coincide</div>
+                                </>
+                              ) : (
+                                <>
+                                  <div style={{ fontSize: 28, marginBottom: 6 }}>⚠️</div>
+                                  <div style={{ fontSize: 12, color: AMBER, fontWeight: 500 }}>El importe de la cotización no coincide con el ticket</div>
+                                  <div style={{ fontSize: 10, color: GRAY_500, marginTop: 4 }}>Un administrador revisará este documento.</div>
+                                  <button onClick={() => setDocState("cotizacion", { success: false, resultado: null, file: null })}
+                                    style={{ marginTop: 10, padding: "6px 16px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 11, cursor: "pointer", color: GRAY_900 }}>
+                                    Entendido
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ) : stC.validando ? (
+                            <div style={{ textAlign: "center", padding: "16px 0" }}>
+                              <div style={{ fontSize: 20, marginBottom: 6 }}>⏳</div>
+                              <div style={{ fontSize: 12, color: GRAY_500 }}>Validando cotización...</div>
+                            </div>
+                          ) : (
+                            <>
+                              {modal.foto_versiones_cotizacion?.length > 0 && (
+                                <div style={{ marginBottom: 10, padding: "8px 10px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 11, color: GREEN }}>
+                                  ✓ Ya subiste {modal.foto_versiones_cotizacion.length} versión(es) de la cotización.
+                                </div>
+                              )}
+                              <div onClick={() => fileRefCotizacion.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFileSelect("cotizacion", e.dataTransfer.files[0]); }}
+                                style={{ border: `1.5px dashed ${GRAY_200}`, borderRadius: 10, padding: "18px 14px", textAlign: "center", cursor: "pointer", marginBottom: 10 }}>
+                                <div style={{ fontSize: 20, color: GRAY_200, marginBottom: 4 }}>📄</div>
+                                <div style={{ fontSize: 11, color: GRAY_500 }}>{stC.file ? stC.file.name : "Clic o arrastra la cotización aquí"}</div>
+                              </div>
+                              {stC.file && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: GRAY_100, borderRadius: 8, fontSize: 10, color: GRAY_900, marginBottom: 10, border: `0.5px solid ${BORDER}` }}>
+                                  <span>📎</span><span style={{ flex: 1 }}>Archivo: {stC.file.name}</span>
+                                </div>
+                              )}
+                              {stC.err && <div style={{ padding: "7px 10px", background: RED_LIGHT, borderRadius: 8, fontSize: 10, color: RED_DARK, marginBottom: 10, border: `0.5px solid #f7c1c1` }}>⚠ {stC.err}</div>}
+                              <input ref={fileRefCotizacion} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFileSelect("cotizacion", e.target.files[0])} />
+                              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                                <button onClick={handleUploadCotizacion} disabled={!stC.file || stC.uploading}
+                                  style={{ padding: "6px 14px", background: stC.file && !stC.uploading ? RED : GRAY_200, color: stC.file && !stC.uploading ? "white" : GRAY_500, border: "none", borderRadius: 8, fontSize: 11, fontWeight: 500, cursor: stC.file && !stC.uploading ? "pointer" : "default" }}>
+                                  {stC.uploading ? "Subiendo..." : "Guardar cotización"}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
                   <button onClick={() => setModal(null)} style={{ padding: "7px 14px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cerrar</button>
                 </div>
