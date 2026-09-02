@@ -32,6 +32,12 @@ const MAX_MB = 10;
 // de importe exacto). Si el string en Supabase cambia, actualizar acá.
 const REQUERIMIENTO_COTIZACION = "P/OLT DESPACHO PROVINCIA";
 
+// Comparación tolerante a espacios extra/mayúsculas -- un "===" estricto
+// falla en silencio ante la mínima diferencia de formato en el dato real.
+function esRequerimientoCotizacion(req) {
+  return (req || "").trim().toUpperCase() === REQUERIMIENTO_COTIZACION.toUpperCase();
+}
+
 // TEMPORAL: el candado de cotización está en piloto solo con RANSA, para
 // probar antes de exigirlo a todos los transportistas con este requerimiento.
 // Cuando el equipo lo valide, cambiar a null -- Y quitar el mismo filtro por
@@ -42,6 +48,7 @@ const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
   "Error de lectura de la IA",
+  "Error Manual Importe",
 ];
 
 // Campos que el transporte puede observar/proponer corrección. Blindado
@@ -309,6 +316,7 @@ export default function App() {
   const [editModal,    setEditModal]    = useState(null);
   const [vista, setVista] = useState("tabla");
   const [confirmObsModal, setConfirmObsModal] = useState(null);
+  const [cotizacionDetalleModal, setCotizacionDetalleModal] = useState(null);
   const [dashProveedor, setDashProveedor] = useState("");
   
   // Asignamos D-1 por defecto al dashboard
@@ -726,7 +734,7 @@ export default function App() {
     });
   }
   function cotizacionEstaCompleta(viaje) {
-    if (viaje?.requerimiento !== REQUERIMIENTO_COTIZACION) return true; // no aplica a este ticket
+    if (!esRequerimientoCotizacion(viaje?.requerimiento)) return true; // no aplica a este ticket
     return ["COINCIDE", "MANUAL"].includes(viaje?.estado_validacion_cotizacion);
   }
 
@@ -905,7 +913,7 @@ export default function App() {
       const payload = { estado_validacion_ia: "MANUAL", usuario_modif: session.user.email, fecha_modif: ahora, motivo_validacion: motivoValidacion };
       if (validModal.placa_2) payload.estado_validacion_ia_2 = "MANUAL";
       if (validModal.placa_3) payload.estado_validacion_ia_3 = "MANUAL";
-      if (validModal.requerimiento === REQUERIMIENTO_COTIZACION) payload.estado_validacion_cotizacion = "MANUAL";
+      if (esRequerimientoCotizacion(validModal.requerimiento)) payload.estado_validacion_cotizacion = "MANUAL";
 
       const { data, error } = await supabase.from("viajes").update(payload).eq("nro_spot", validModal.nro_spot).select().single();
       if (error) throw error;
@@ -1573,14 +1581,19 @@ export default function App() {
                       } else if (c.key === "estado_validacion_cotizacion") {
                         // Solo aplica al requerimiento con candado de cotización -- para
                         // cualquier otro ticket, no hay nada que mostrar acá.
-                        if (v.requerimiento !== REQUERIMIENTO_COTIZACION) {
+                        if (!esRequerimientoCotizacion(v.requerimiento)) {
                           content = <span style={{ color: GRAY_200 }}>—</span>;
                         } else {
                           const ec = v.estado_validacion_cotizacion;
                           const bg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN_LIGHT : ec === "NO_COINCIDE" ? RED_LIGHT : AMBER_LIGHT;
                           const fg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN : ec === "NO_COINCIDE" ? RED_DARK : AMBER;
                           const label = ec ? String(ec).toUpperCase() : "PENDIENTE";
-                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
+                          content = (
+                            <span onClick={() => setCotizacionDetalleModal(v)} title="Ver detalle de la cotización"
+                              style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap", cursor: "pointer" }}>
+                              {label}
+                            </span>
+                          );
                         }
                       } else if (c.key === "estado_validacion_ia") {
                         const partes = [v.estado_validacion_ia, v.estado_validacion_ia_2, v.estado_validacion_ia_3].filter(Boolean).map(s => String(s).toUpperCase());
@@ -2325,6 +2338,58 @@ export default function App() {
         </div>
       )}
 
+      {cotizacionDetalleModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && setCotizacionDetalleModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Cotización de flete</div>
+              <button onClick={() => setCotizacionDetalleModal(null)} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 18, fontFamily: "monospace" }}>{cotizacionDetalleModal.nro_spot}</div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3 }}>Importe (ticket)</div>
+                <div style={{ fontSize: 13, color: GRAY_900 }}>{cotizacionDetalleModal.importe ?? "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3 }}>Importe detectado (IA)</div>
+                <div style={{ fontSize: 13, color: GRAY_900 }}>{cotizacionDetalleModal.importe_detectado_cotizacion ?? "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3 }}>Estado</div>
+                {(() => {
+                  const ec = cotizacionDetalleModal.estado_validacion_cotizacion;
+                  const bg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN_LIGHT : ec === "NO_COINCIDE" ? RED_LIGHT : AMBER_LIGHT;
+                  const fg = ec === "COINCIDE" || ec === "MANUAL" ? GREEN : ec === "NO_COINCIDE" ? RED_DARK : AMBER;
+                  const label = ec ? String(ec).toUpperCase() : "PENDIENTE";
+                  return <span style={{ display: "inline-flex", padding: "2px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: fg }}>{label}</span>;
+                })()}
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 5 }}>Imagen</div>
+                {cotizacionDetalleModal.foto_cotizacion ? (
+                  <button onClick={() => abrirFoto(cotizacionDetalleModal.foto_cotizacion)} title="Ver imagen de la cotización"
+                    style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${BORDER}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: GRAY_500 }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 12, color: GRAY_200 }}>Sin imagen subida todavía</span>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+              <button onClick={() => setCotizacionDetalleModal(null)} style={{ padding: "7px 20px", background: GRAY_100, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", color: GRAY_900 }}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmObsModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
           onClick={e => e.target === e.currentTarget && setConfirmObsModal(null)}>
@@ -2811,7 +2876,7 @@ export default function App() {
                   );
                 })}
 
-                {modal.requerimiento === REQUERIMIENTO_COTIZACION && enPilotoCotizacion && (
+                {esRequerimientoCotizacion(modal.requerimiento) && enPilotoCotizacion && (
                   <div style={{ marginTop: 22, paddingTop: 20, borderTop: `0.5px solid ${BORDER}` }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: GRAY_900, marginBottom: 8 }}>Cotización de flete</div>
 
