@@ -3,6 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = "https://zffuccirauheklpxagga.supabase.co";
 const UMBRAL_COINCIDENCIA = 95;
 
+// ============================================================
+// GR (guía de remisión) -- SIN CAMBIOS respecto a la versión anterior.
+// Match difuso (tolera errores de OCR), pensado para números de guía.
+// ============================================================
+
 function normalizar(texto) {
   return (texto || "").replace(/[^0-9]/g, "");
 }
@@ -71,6 +76,100 @@ function sufijo(documento) {
   return documento === 1 ? "" : `_${documento}`;
 }
 
+// ============================================================
+// COTIZACIÓN DE FLETE -- NUEVO. Match EXACTO (no difuso), pensado para
+// el Importe. Requerimiento "P/OLT DESPACHO PROVINCIA" únicamente.
+// ============================================================
+
+// Extrae todos los números con pinta de monto (con o sin comas de miles,
+// con o sin decimales) del texto de Vision, y los devuelve como floats.
+function extraerCandidatosImporte(texto) {
+  const matches = (texto || "").match(/\d[\d,]*\.?\d*/g) || [];
+  return matches.map(m => parseFloat(m.replace(/,/g, ""))).filter(n => !isNaN(n));
+}
+
+// Compara el Importe del ticket (tal como esté guardado: "8200", "8200.00",
+// "8,200.00") contra cualquier número que Vision haya detectado en la
+// imagen -- por VALOR numérico real, no por texto, para que el formato no
+// importe. Tolerancia de 0.005 solo para redondeos de punto flotante, no
+// es una tolerancia de negocio.
+function compararImporteExacto(importeCol, textoOcr) {
+  const importeNum = parseFloat(String(importeCol ?? "").replace(/,/g, ""));
+  if (isNaN(importeNum)) return { coincide: false, importeNum: null };
+  const candidatos = extraerCandidatosImporte(textoOcr);
+  const coincide = candidatos.some(c => Math.abs(c - importeNum) < 0.005);
+  return { coincide, importeNum };
+}
+
+async function procesarCotizacion(supabase, nro_spot) {
+  try {
+    const { data: viaje, error: errViaje } = await supabase
+      .from("viajes")
+      .select("nro_spot, importe, foto_cotizacion")
+      .eq("nro_spot", nro_spot)
+      .single();
+
+    if (errViaje || !viaje) return { status: 404, body: { error: "Viaje no encontrado" } };
+    if (!viaje.foto_cotizacion) return { status: 400, body: { error: "La cotización no tiene foto" } };
+
+    const { data: imgBlob, error: errDownload } = await supabase.storage
+      .from("documentos")
+      .download(viaje.foto_cotizacion);
+    if (errDownload) throw new Error(`Error descargando imagen: ${errDownload.message}`);
+
+    const arrayBuffer = await imgBlob.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+    const visionRes = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${process.env.GOOGLE_VISION_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: [{
+            image: { content: base64 },
+            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+          }],
+        }),
+      }
+    );
+
+    const visionData = await visionRes.json();
+    const respuesta = visionData.responses?.[0];
+    if (respuesta?.error) throw new Error(`Vision API: ${respuesta.error.message}`);
+
+    const textoOcr = respuesta?.fullTextAnnotation?.text || "";
+    const match = compararImporteExacto(viaje.importe, textoOcr);
+
+    const payload = {
+      estado_procesamiento_cotizacion: "PROCESADO",
+      estado_validacion_cotizacion: match.coincide ? "COINCIDE" : "NO_COINCIDE",
+      // Se guarda el texto completo (acotado a 3000 caracteres) -- acá no hay
+      // una "ventana" puntual como en el GR, porque no buscamos un número
+      // conocido de antemano dentro del texto, sino que extraemos candidatos.
+      texto_detectado_cotizacion: textoOcr.slice(0, 3000),
+    };
+
+    const { error: errUpdate } = await supabase.from("viajes").update(payload).eq("nro_spot", nro_spot);
+    if (errUpdate) throw new Error(`Error actualizando Supabase: ${errUpdate.message}`);
+
+    return { status: 200, body: payload };
+
+  } catch (e) {
+    await supabase.from("viajes").update({
+      estado_procesamiento_cotizacion: "ERROR",
+      estado_validacion_cotizacion: null,
+      texto_detectado_cotizacion: null,
+    }).eq("nro_spot", nro_spot);
+
+    return { status: 500, body: { error: e.message } };
+  }
+}
+
+// ============================================================
+// Handler principal
+// ============================================================
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -81,7 +180,16 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Falta nro_spot" });
   }
 
-  // Por compatibilidad, si no mandan "documento" se asume el 1 (tickets de 1 solo documento)
+  const supabase = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+
+  // --- Rama nueva: cotización de flete -- completamente aparte del flujo
+  // de GR de abajo, para no arriesgar nada de lo que ya funciona. ---
+  if (documento === "cotizacion") {
+    const resultado = await procesarCotizacion(supabase, nro_spot);
+    return res.status(resultado.status).json(resultado.body);
+  }
+
+  // --- Flujo de GR (placa/rutas) -- IDÉNTICO a la versión anterior ---
   const doc = [1, 2, 3].includes(documento) ? documento : 1;
   const suf = sufijo(doc);
   const colRutas = `rutas${suf}`;
@@ -90,8 +198,6 @@ export default async function handler(req, res) {
   const colValidacion = `estado_validacion_ia${suf}`;
   const colTexto = `texto_detectado_ia${suf}`;
   const colMatch = `match_ia${suf}`;
-
-  const supabase = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
   try {
     const { data: viaje, error: errViaje } = await supabase
