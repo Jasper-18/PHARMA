@@ -28,14 +28,20 @@ const MAX_MB = 10;
 // y alimentan el gráfico de barras del Panel Técnico. Se puede ampliar esta
 // lista más adelante sin romper lo ya registrado (los valores viejos siguen
 // contando igual en el gráfico, con su propio nombre).
-// Único requerimiento que exige subir además la cotización de flete (candado
-// de importe exacto). Si el string en Supabase cambia, actualizar acá.
-const REQUERIMIENTO_COTIZACION = "P/OLT DESPACHO PROVINCIA";
+// Requerimientos que exigen subir además la cotización de flete (candado de
+// importe exacto). Si algún string en Supabase cambia, actualizar acá.
+const REQUERIMIENTOS_COTIZACION = [
+  "P/OLT DESPACHO PROVINCIA",
+  "E/VOLUMEN B2C, B2B. T2",
+  "E/TRASLADO ENTRE BOTICAS",
+  "E/CUADRILLA",
+];
 
 // Comparación tolerante a espacios extra/mayúsculas -- un "===" estricto
 // falla en silencio ante la mínima diferencia de formato en el dato real.
 function esRequerimientoCotizacion(req) {
-  return (req || "").trim().toUpperCase() === REQUERIMIENTO_COTIZACION.toUpperCase();
+  const reqNorm = (req || "").trim().toUpperCase();
+  return REQUERIMIENTOS_COTIZACION.some(r => r.toUpperCase() === reqNorm);
 }
 
 // TEMPORAL: el candado de cotización está en piloto solo con RANSA, para
