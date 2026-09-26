@@ -50,6 +50,23 @@ function esRequerimientoCotizacion(req) {
 // proveedor en el trigger SQL actualizar_estado_final (ver comentarios ahí).
 const PILOTO_COTIZACION_PROVEEDOR = "RANSA";
 
+// TEMPORAL: el apartado de Tránsitos está en piloto solo con RANSA. Cuando
+// el equipo lo valide, cambiar a null para habilitarlo a todos.
+const PILOTO_TRANSITOS_PROVEEDOR = "RANSA";
+
+// Columnas de registros_transito a mostrar en la tabla, en orden.
+const COLS_TRANSITOS = [
+  { key: "nro_carga_final",     label: "N° Carga",   width: 130, mono: true },
+  { key: "nro_lpn_final",       label: "N° LPN",     width: 150, mono: true },
+  { key: "nombre_instalacion_final", label: "Instalación", width: 150 },
+  { key: "nombre_ruta_consolidada",  label: "Ruta",   width: 140 },
+  { key: "tipo_mercaderia",     label: "Tipo Mercadería", width: 110 },
+  { key: "costo_total",         label: "Costo",      width: 90 },
+  { key: "fecha_limite_transp", label: "Fecha Límite", width: 110 },
+  { key: "respuesta_transportista", label: "Sustento",   width: 140 },
+  { key: "estado_validacion_admin", label: "Validación", width: 120 },
+];
+
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
@@ -322,6 +339,20 @@ export default function App() {
   const [vista, setVista] = useState("tabla");
   const [confirmObsModal, setConfirmObsModal] = useState(null);
   const [cotizacionDetalleModal, setCotizacionDetalleModal] = useState(null);
+
+  // --- Tránsitos (registros_transito) ---
+  const [transitos, setTransitos] = useState([]);
+  const [transitosLoading, setTransitosLoading] = useState(false);
+  const [transitoSustentoModal, setTransitoSustentoModal] = useState(null); // registro sobre el que se abrió el modal
+  const [transitoOpcionElegida, setTransitoOpcionElegida] = useState(null); // 'ADJUNTA_SUSTENTO' | 'SIN_SUSTENTO' | null
+  const [transitoSoloEsteBulto, setTransitoSoloEsteBulto] = useState(false);
+  const [transitoMotivo, setTransitoMotivo] = useState("");
+  const [transitoArchivos, setTransitoArchivos] = useState([]); // hasta 2 File
+  const [transitoSaving, setTransitoSaving] = useState(false);
+  const [transitoErr, setTransitoErr] = useState("");
+  const [transitoValidarModal, setTransitoValidarModal] = useState(null); // { registro, accion: 'APROBADO'|'DESAPROBADO' } (admin)
+  const [transitoMotivoDesaprobacion, setTransitoMotivoDesaprobacion] = useState("");
+  const [transitoValidarSaving, setTransitoValidarSaving] = useState(false);
   const [dashProveedor, setDashProveedor] = useState("");
   
   // Asignamos D-1 por defecto al dashboard
@@ -455,6 +486,33 @@ export default function App() {
   }, [session]);
 
   useEffect(() => { if (session) fetchViajes(); }, [session]);
+
+  // TEMPORAL: mientras RANSA solo prueba Tránsitos (piloto sin OCR/GR), abre
+  // directo ahí al loguear -- no aplica a admin ni a otros transportistas.
+  useEffect(() => {
+    if (!session) return;
+    const meta = session.user.user_metadata;
+    const isAdminUser = meta?.role === "admin";
+    if (!isAdminUser && meta?.empresa_id === "RANSA") {
+      setVista("transitos");
+    }
+  }, [session]);
+
+  // --- Tránsitos ---
+  const fetchTransitos = useCallback(async () => {
+    if (!session) return;
+    setTransitosLoading(true);
+    const meta = session.user.user_metadata;
+    const isAdminUser = meta?.role === "admin";
+    let q = supabase.from("registros_transito").select("*").order("nro_carga_final", { ascending: true });
+    if (!isAdminUser && meta?.empresa_id) q = q.eq("proveedor", meta.empresa_id);
+    const { data, error } = await q;
+    if (error) console.error("Error cargando registros_transito:", error);
+    setTransitos(data || []);
+    setTransitosLoading(false);
+  }, [session]);
+
+  useEffect(() => { if (session && vista === "transitos") fetchTransitos(); }, [session, vista, fetchTransitos]);
 
   useEffect(() => {
     if (!session) return;
@@ -809,6 +867,93 @@ export default function App() {
       }
     } catch (err) {
       setDocState("cotizacion", { err: err.message || "Error al subir el archivo.", uploading: false });
+    }
+  }
+
+  // --- Tránsitos: transportista guarda su respuesta (con o sin sustento) ---
+  async function handleGuardarSustento(opcion) {
+    if (!transitoSustentoModal) return;
+    if (opcion === "SIN_SUSTENTO" && !transitoMotivo.trim()) {
+      setTransitoErr("Explica por qué no cuenta con sustento.");
+      return;
+    }
+    if (opcion === "ADJUNTA_SUSTENTO" && transitoArchivos.length === 0) {
+      setTransitoErr("Adjunta al menos 1 foto.");
+      return;
+    }
+    setTransitoSaving(true);
+    setTransitoErr("");
+    try {
+      const registro = transitoSustentoModal;
+      const ahora = new Date().toISOString();
+      const payload = {
+        respuesta_transportista: opcion,
+        motivo_transportista: opcion === "SIN_SUSTENTO" ? transitoMotivo.trim() : null,
+        fecha_respuesta_transportista: ahora,
+        subido_por: session.user.email,
+        estado_validacion_admin: "PENDIENTE", // vuelve a pendiente si se estaba resubiendo
+      };
+
+      // El path incluye la carga siempre -- y además el LPN puntual solo si
+      // la respuesta aplica a un único bulto (evita que 2 fotos "solo este
+      // bulto" de bultos distintos de la misma carga se pisen entre sí).
+      const carpetaBase = transitoSoloEsteBulto
+        ? `transitos/${registro.proveedor}/${registro.nro_carga_final}/${registro.nro_lpn_final}`
+        : `transitos/${registro.proveedor}/${registro.nro_carga_final}`;
+
+      if (opcion === "ADJUNTA_SUSTENTO") {
+        for (let idx = 0; idx < Math.min(transitoArchivos.length, 2); idx++) {
+          const comprimido = await comprimirImagen(transitoArchivos[idx]);
+          const ext = comprimido.name.split(".").pop();
+          const path = `${carpetaBase}/sustento_${idx + 1}_${Date.now()}.${ext}`;
+          const { error: upErr } = await supabase.storage.from("documentos").upload(path, comprimido, { upsert: true });
+          if (upErr) throw upErr;
+          const sufijo = idx + 1;
+          const versionesPrev = registro[`foto_versiones_${sufijo}`] || [];
+          payload[`foto_url_${sufijo}`] = path;
+          payload[`foto_versiones_${sufijo}`] = [...versionesPrev, { v: versionesPrev.length + 1, path, subido_por: session.user.email, subido_en: ahora }];
+        }
+      }
+
+      const filtro = transitoSoloEsteBulto
+        ? { columna: "nro_lpn_final", valor: registro.nro_lpn_final }
+        : { columna: "nro_carga_final", valor: registro.nro_carga_final };
+
+      const { error } = await supabase.from("registros_transito").update(payload).eq(filtro.columna, filtro.valor);
+      if (error) throw error;
+
+      setTransitos(prev => prev.map(t => (t[filtro.columna] === filtro.valor ? { ...t, ...payload } : t)));
+      setTransitoSustentoModal(null);
+    } catch (err) {
+      setTransitoErr(err.message || "Error al guardar.");
+    } finally {
+      setTransitoSaving(false);
+    }
+  }
+
+  // --- Tránsitos: admin aprueba/desaprueba (con confirmación) ---
+  async function handleValidarTransito() {
+    if (!transitoValidarModal) return;
+    const { registro, accion } = transitoValidarModal;
+    if (accion === "DESAPROBADO" && !transitoMotivoDesaprobacion.trim()) {
+      return; // el modal ya exige el motivo antes de habilitar el botón
+    }
+    setTransitoValidarSaving(true);
+    try {
+      const payload = {
+        estado_validacion_admin: accion,
+        validado_por: session.user.email,
+        fecha_validacion: new Date().toISOString(),
+        motivo_desaprobacion: accion === "DESAPROBADO" ? transitoMotivoDesaprobacion.trim() : null,
+      };
+      const { error } = await supabase.from("registros_transito").update(payload).eq("nro_lpn_final", registro.nro_lpn_final);
+      if (error) throw error;
+      setTransitos(prev => prev.map(t => t.nro_lpn_final === registro.nro_lpn_final ? { ...t, ...payload } : t));
+      setTransitoValidarModal(null);
+    } catch (err) {
+      alert("Error al validar: " + (err.message || ""));
+    } finally {
+      setTransitoValidarSaving(false);
     }
   }
 
@@ -1288,6 +1433,7 @@ export default function App() {
 
   const enPilotoObservaciones = !PILOTO_OBSERVACIONES_PROVEEDOR || empresa === PILOTO_OBSERVACIONES_PROVEEDOR;
   const enPilotoCotizacion = isAdmin || !PILOTO_COTIZACION_PROVEEDOR || empresa === PILOTO_COTIZACION_PROVEEDOR;
+  const enPilotoTransitos = isAdmin || !PILOTO_TRANSITOS_PROVEEDOR || empresa === PILOTO_TRANSITOS_PROVEEDOR;
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
     : COLS_TRANSPORTISTA_PRINCIPAL
@@ -1364,7 +1510,7 @@ export default function App() {
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
         {/* SIDEBAR */}
-        {isAdmin && (
+        {(isAdmin || enPilotoTransitos) && (
           <div style={{ width: 190, background: "white", borderRight: `0.5px solid ${BORDER}`, flexShrink: 0, display: "flex", flexDirection: "column", padding: "14px 10px" }}>
             <button onClick={() => setVista("tabla")}
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "tabla" ? RED_LIGHT : "transparent", color: vista === "tabla" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "tabla" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
@@ -1375,40 +1521,59 @@ export default function App() {
               </svg> 
               Seguimiento Adicionales
             </button>
-            <button onClick={() => setVista("dashboard")}
-              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard" ? RED_LIGHT : "transparent", color: vista === "dashboard" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                <line x1="18" y1="20" x2="18" y2="10"></line>
-                <line x1="12" y1="20" x2="12" y2="4"></line>
-                <line x1="6" y1="20" x2="6" y2="14"></line>
-              </svg> 
-              Dashboard
-            </button>
-            <button onClick={() => setVista("tecnico")}
-              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "tecnico" ? RED_LIGHT : "transparent", color: vista === "tecnico" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "tecnico" ? 600 : 500, cursor: "pointer", textAlign: "left" }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-              </svg> 
-              Panel Técnico
-            </button>
-            <button onClick={() => setVista("confirmaciones")}
-              style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "confirmaciones" ? RED_LIGHT : "transparent", color: vista === "confirmaciones" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "confirmaciones" ? 600 : 500, cursor: "pointer", textAlign: "left", marginTop: 4, justifyContent: "space-between" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            {isAdmin && (
+              <button onClick={() => setVista("dashboard")}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard" ? RED_LIGHT : "transparent", color: vista === "dashboard" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                </svg>
-                Observaciones
-              </span>
-              {solicitudesPendientes.length > 0 && (
-                <span style={{ background: solicitudesPendientes.length > 0 ? RED : GRAY_200, color: "white", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "1px 7px", minWidth: 16, textAlign: "center" }}>
-                  {solicitudesPendientes.length}
+                  <line x1="18" y1="20" x2="18" y2="10"></line>
+                  <line x1="12" y1="20" x2="12" y2="4"></line>
+                  <line x1="6" y1="20" x2="6" y2="14"></line>
+                </svg> 
+                Dashboard
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => setVista("tecnico")}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "tecnico" ? RED_LIGHT : "transparent", color: vista === "tecnico" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "tecnico" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg> 
+                Panel Técnico
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => setVista("confirmaciones")}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "confirmaciones" ? RED_LIGHT : "transparent", color: vista === "confirmaciones" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "confirmaciones" ? 600 : 500, cursor: "pointer", textAlign: "left", marginBottom: 4, justifyContent: "space-between" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                  </svg>
+                  Observaciones
                 </span>
-              )}
-            </button>
+                {solicitudesPendientes.length > 0 && (
+                  <span style={{ background: solicitudesPendientes.length > 0 ? RED : GRAY_200, color: "white", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "1px 7px", minWidth: 16, textAlign: "center" }}>
+                    {solicitudesPendientes.length}
+                  </span>
+                )}
+              </button>
+            )}
+            {enPilotoTransitos && (
+              <button onClick={() => setVista("transitos")}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "transitos" ? RED_LIGHT : "transparent", color: vista === "transitos" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "transitos" ? 600 : 500, cursor: "pointer", textAlign: "left", marginTop: 4 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <rect x="1" y="3" width="15" height="13"></rect>
+                  <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                  <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                  <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                </svg>
+                Tránsitos
+              </button>
+            )}
           </div>
         )}
+
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
 
@@ -2257,6 +2422,82 @@ export default function App() {
         </div>
       )}
 
+      {vista === "transitos" && enPilotoTransitos && (
+        <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Tránsitos</div>
+            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>Bultos en tránsito con retraso -- el sustento se registra a nivel de carga</div>
+          </div>
+
+          {transitosLoading ? (
+            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>Cargando...</div>
+          ) : transitos.length === 0 ? (
+            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay registros.</div>
+          ) : (
+            <div style={{ background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 10, overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: GRAY_50, borderBottom: `0.5px solid ${BORDER}` }}>
+                    {COLS_TRANSITOS.map(c => (
+                      <th key={c.key} style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap" }}>{c.label}</th>
+                    ))}
+                    <th style={{ padding: "9px 12px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transitos.map(r => (
+                    <tr key={r.nro_lpn_final} style={{ borderBottom: `0.5px solid ${GRAY_100}` }}>
+                      {COLS_TRANSITOS.map(c => {
+                        let content;
+                        if (c.key === "respuesta_transportista") {
+                          const val = r.respuesta_transportista;
+                          const bg = val === "ADJUNTA_SUSTENTO" ? GREEN_LIGHT : val === "SIN_SUSTENTO" ? AMBER_LIGHT : GRAY_100;
+                          const fg = val === "ADJUNTA_SUSTENTO" ? GREEN : val === "SIN_SUSTENTO" ? AMBER : GRAY_500;
+                          const label = val === "ADJUNTA_SUSTENTO" ? "CON SUSTENTO" : val === "SIN_SUSTENTO" ? "SIN SUSTENTO" : "PENDIENTE";
+                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
+                        } else if (c.key === "estado_validacion_admin") {
+                          const val = r.estado_validacion_admin;
+                          const bg = val === "APROBADO" ? GREEN_LIGHT : val === "DESAPROBADO" ? RED_LIGHT : AMBER_LIGHT;
+                          const fg = val === "APROBADO" ? GREEN : val === "DESAPROBADO" ? RED_DARK : AMBER;
+                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{val}</span>;
+                        } else if (c.key === "costo_total") {
+                          content = r.costo_total != null ? Number(r.costo_total).toFixed(2) : "—";
+                        } else if (c.key === "fecha_limite_transp") {
+                          content = r.fecha_limite_transp ? fmtFechaSolo(r.fecha_limite_transp) : "—";
+                        } else {
+                          content = (r[c.key] ?? "—");
+                        }
+                        return <td key={c.key} style={{ padding: "9px 12px", color: GRAY_900, fontFamily: c.mono ? "monospace" : "inherit", whiteSpace: "nowrap" }}>{content}</td>;
+                      })}
+                      <td style={{ padding: "9px 12px" }}>
+                        {!isAdmin && (
+                          <button onClick={() => { setTransitoSustentoModal(r); setTransitoSoloEsteBulto(false); setTransitoOpcionElegida(null); setTransitoMotivo(""); setTransitoArchivos([]); setTransitoErr(""); }}
+                            style={{ padding: "5px 12px", background: "white", border: `1px solid ${BORDER}`, borderRadius: 7, fontSize: 11, fontWeight: 500, color: GRAY_900, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            Sustentar
+                          </button>
+                        )}
+                        {isAdmin && r.estado_validacion_admin === "PENDIENTE" && r.respuesta_transportista && (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button onClick={() => setTransitoValidarModal({ registro: r, accion: "APROBADO" })} title="Aprobar"
+                              style={{ width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${GREEN}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            </button>
+                            <button onClick={() => { setTransitoValidarModal({ registro: r, accion: "DESAPROBADO" }); setTransitoMotivoDesaprobacion(""); }} title="Desaprobar"
+                              style={{ width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${RED}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
         </div>
       </div>
 
@@ -2354,6 +2595,136 @@ export default function App() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {transitoSustentoModal && (() => {
+        const bultosDeLaCarga = transitos.filter(t => t.nro_carga_final === transitoSustentoModal.nro_carga_final);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+            onClick={e => e.target === e.currentTarget && !transitoSaving && setTransitoSustentoModal(null)}>
+            <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>Sustentar carga</div>
+                <button onClick={() => setTransitoSustentoModal(null)} disabled={transitoSaving} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              </div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, fontFamily: "monospace" }}>{transitoSustentoModal.nro_carga_final}</div>
+
+              <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8, marginBottom: 16 }}>
+                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
+                  Esta carga tiene {bultosDeLaCarga.length} bulto(s)
+                </div>
+                <div style={{ fontSize: 11, color: GRAY_900, fontFamily: "monospace", lineHeight: 1.6, maxHeight: 90, overflowY: "auto" }}>
+                  {bultosDeLaCarga.map(b => (
+                    <div key={b.nro_lpn_final} style={{ fontWeight: b.nro_lpn_final === transitoSustentoModal.nro_lpn_final ? 700 : 400 }}>
+                      {b.nro_lpn_final}{b.nro_lpn_final === transitoSustentoModal.nro_lpn_final ? " (este)" : ""}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
+                <input type="checkbox" checked={transitoSoloEsteBulto} onChange={e => setTransitoSoloEsteBulto(e.target.checked)} />
+                Aplicar solo a este bulto ({transitoSustentoModal.nro_lpn_final}) -- para sustento parcial
+              </label>
+
+              {!transitoOpcionElegida ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button onClick={() => setTransitoOpcionElegida("ADJUNTA_SUSTENTO")}
+                    style={{ padding: "10px 0", background: GREEN, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                    Adjuntar sustento
+                  </button>
+                  <button onClick={() => setTransitoOpcionElegida("SIN_SUSTENTO")}
+                    style={{ padding: "10px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                    No cuenta con sustento
+                  </button>
+                </div>
+              ) : transitoOpcionElegida === "ADJUNTA_SUSTENTO" ? (
+                <div>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Adjunta hasta 2 fotos:</div>
+                  <input type="file" accept="image/*" multiple
+                    onChange={e => setTransitoArchivos(Array.from(e.target.files).slice(0, 2))}
+                    style={{ fontSize: 12, marginBottom: 10 }} />
+                  {transitoArchivos.length > 0 && (
+                    <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 10 }}>
+                      {transitoArchivos.map((f, i) => <div key={i}>📎 {f.name}</div>)}
+                    </div>
+                  )}
+                  {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { setTransitoOpcionElegida(null); setTransitoArchivos([]); setTransitoErr(""); }} disabled={transitoSaving}
+                      style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
+                      Atrás
+                    </button>
+                    <button onClick={() => handleGuardarSustento("ADJUNTA_SUSTENTO")} disabled={transitoSaving}
+                      style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : GREEN, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
+                      {transitoSaving ? "Guardando..." : "Guardar"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Explica por qué no cuenta con sustento:</div>
+                  <textarea value={transitoMotivo} onChange={e => { setTransitoMotivo(e.target.value); setTransitoErr(""); }} rows={3}
+                    style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }} />
+                  {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { setTransitoOpcionElegida(null); setTransitoErr(""); }} disabled={transitoSaving}
+                      style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
+                      Atrás
+                    </button>
+                    <button onClick={() => handleGuardarSustento("SIN_SUSTENTO")} disabled={transitoSaving}
+                      style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : RED, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
+                      {transitoSaving ? "Guardando..." : "Guardar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {transitoValidarModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={e => e.target === e.currentTarget && !transitoValidarSaving && setTransitoValidarModal(null)}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 38, height: 38, borderRadius: "50%", background: transitoValidarModal.accion === "APROBADO" ? GREEN_LIGHT : RED_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {transitoValidarModal.accion === "APROBADO" ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>
+                  {transitoValidarModal.accion === "APROBADO" ? "Aprobar sustento" : "Desaprobar sustento"}
+                </div>
+                <div style={{ fontSize: 12, color: GRAY_500 }}>
+                  Bulto <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{transitoValidarModal.registro.nro_lpn_final}</span>
+                  {" "}(carga {transitoValidarModal.registro.nro_carga_final})
+                </div>
+              </div>
+            </div>
+
+            {transitoValidarModal.accion === "DESAPROBADO" && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Motivo de la desaprobación:</div>
+                <textarea value={transitoMotivoDesaprobacion} onChange={e => setTransitoMotivoDesaprobacion(e.target.value)} rows={3}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontFamily: "inherit", resize: "vertical" }} />
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setTransitoValidarModal(null)} disabled={transitoValidarSaving}
+                style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
+              <button onClick={handleValidarTransito} disabled={transitoValidarSaving || (transitoValidarModal.accion === "DESAPROBADO" && !transitoMotivoDesaprobacion.trim())}
+                style={{ padding: "7px 20px", background: transitoValidarSaving ? GRAY_200 : (transitoValidarModal.accion === "APROBADO" ? GREEN : RED), color: transitoValidarSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoValidarSaving ? "default" : "pointer" }}>
+                {transitoValidarSaving ? "Guardando..." : (transitoValidarModal.accion === "APROBADO" ? "Sí, aprobar" : "Sí, desaprobar")}
+              </button>
+            </div>
           </div>
         </div>
       )}
