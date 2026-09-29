@@ -50,9 +50,11 @@ function esRequerimientoCotizacion(req) {
 // proveedor en el trigger SQL actualizar_estado_final (ver comentarios ahí).
 const PILOTO_COTIZACION_PROVEEDOR = "RANSA";
 
-// TEMPORAL: el apartado de Tránsitos está en piloto solo con RANSA. Cuando
-// el equipo lo valide, cambiar a null para habilitarlo a todos.
-const PILOTO_TRANSITOS_PROVEEDOR = "RANSA";
+// TEMPORAL: el apartado de Tránsitos está en piloto. Lista de transportistas
+// (empresa_id, igual que TRANSPORTISTA_ESTANDARIZADO del Excel) que ya lo
+// ven. Para sumar uno, agregarlo aquí. Cuando el equipo lo valide, cambiar a
+// null para habilitarlo a todos.
+const PILOTO_TRANSITOS_PROVEEDORES = ["RANSA"];
 
 // Columnas de registros_transito a mostrar en la tabla, en orden.
 const COLS_TRANSITOS = [
@@ -930,11 +932,18 @@ export default function App() {
 
   // --- Tránsitos: transportista guarda su respuesta (con o sin sustento) ---
   // Bultos a los que se aplica la respuesta: el bulto puntual, o toda la carga
-  // EXCEPTO los ya aprobados (un reenvío a nivel carga no debe borrar una
-  // aprobación que el admin ya dio).
+  // EXCEPTO (a) los ya aprobados -- un reenvío no debe borrar una aprobación
+  // que el admin ya dio -- y (b) los que tienen un sustento individual propio
+  // ("solo este bulto"): un sustento a nivel carga no los pisa. El bulto desde
+  // el que se abrió el modal sí entra si el usuario desmarcó "solo este
+  // bulto", porque ahí la intención de pasarlo a nivel carga es explícita.
   function objetivosSustento(registro, soloEsteBulto) {
     if (soloEsteBulto) return transitos.filter(t => t.nro_lpn_final === registro.nro_lpn_final);
-    return transitos.filter(t => t.nro_carga_final === registro.nro_carga_final && t.estado_validacion_admin !== "APROBADO");
+    return transitos.filter(t =>
+      t.nro_carga_final === registro.nro_carga_final &&
+      t.estado_validacion_admin !== "APROBADO" &&
+      (!t.sustento_individual || t.nro_lpn_final === registro.nro_lpn_final)
+    );
   }
 
   async function handleGuardarSustento(opcion) {
@@ -950,7 +959,7 @@ export default function App() {
     const registro = transitoSustentoModal;
     const objetivos = objetivosSustento(registro, transitoSoloEsteBulto);
     if (objetivos.length === 0) {
-      setTransitoErr("Todos los bultos de esta carga ya están aprobados.");
+      setTransitoErr("No quedan bultos por sustentar en esta carga: están aprobados o tienen sustento individual.");
       return;
     }
     setTransitoSaving(true);
@@ -966,6 +975,7 @@ export default function App() {
         motivo_transportista: opcion === "SIN_SUSTENTO" ? transitoMotivo.trim() : null,
         fecha_respuesta_transportista: ahora,
         subido_por: email,
+        sustento_individual: transitoSoloEsteBulto,
         estado_validacion_admin: "PENDIENTE",
         validado_por: null,
         fecha_validacion: null,
@@ -1027,7 +1037,7 @@ export default function App() {
 
   function abrirSustentoTransito(r) {
     setTransitoSustentoModal(r);
-    setTransitoSoloEsteBulto(false);
+    setTransitoSoloEsteBulto(!!r.sustento_individual);
     setTransitoOpcionElegida(null);
     setTransitoMotivo("");
     setTransitoArchivos([]);
@@ -1589,7 +1599,7 @@ export default function App() {
 
   const enPilotoObservaciones = !PILOTO_OBSERVACIONES_PROVEEDOR || empresa === PILOTO_OBSERVACIONES_PROVEEDOR;
   const enPilotoCotizacion = isAdmin || !PILOTO_COTIZACION_PROVEEDOR || empresa === PILOTO_COTIZACION_PROVEEDOR;
-  const enPilotoTransitos = isAdmin || !PILOTO_TRANSITOS_PROVEEDOR || empresa === PILOTO_TRANSITOS_PROVEEDOR;
+  const enPilotoTransitos = isAdmin || !PILOTO_TRANSITOS_PROVEEDORES || PILOTO_TRANSITOS_PROVEEDORES.includes(empresa);
   const colsVisibles = isAdmin
     ? COLS.filter(c => !c.adminOnly || isAdmin)
     : COLS_TRANSPORTISTA_PRINCIPAL
@@ -2660,9 +2670,12 @@ export default function App() {
                         let content;
                         if (c.key === "respuesta_transportista") {
                           const val = r.respuesta_transportista;
-                          content = val === "ADJUNTA_SUSTENTO" ? badge(GREEN_LIGHT, GREEN, "CON SUSTENTO")
+                          const b = val === "ADJUNTA_SUSTENTO" ? badge(GREEN_LIGHT, GREEN, "CON SUSTENTO")
                             : val === "SIN_SUSTENTO" ? badge(AMBER_LIGHT, AMBER, "SIN SUSTENTO")
                             : badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
+                          content = val && r.sustento_individual ? (
+                            <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>Solo este bulto</div></div>
+                          ) : b;
                         } else if (c.key === "estado_validacion_admin") {
                           if (estado === "SIN_RESPUESTA") content = <span style={{ color: GRAY_200 }}>—</span>;
                           else if (estado === "POR_VALIDAR") content = badge(AMBER_LIGHT, AMBER, "POR VALIDAR");
@@ -2819,6 +2832,9 @@ export default function App() {
         const reg = transitoSustentoModal;
         const bultosDeLaCarga = transitos.filter(t => t.nro_carga_final === reg.nro_carga_final);
         const aprobadosEnCarga = bultosDeLaCarga.filter(t => t.estado_validacion_admin === "APROBADO").length;
+        const individualesEnCarga = bultosDeLaCarga.filter(t =>
+          t.sustento_individual && t.estado_validacion_admin !== "APROBADO" && t.nro_lpn_final !== reg.nro_lpn_final).length;
+        const plural = (n, uno, varios) => (n === 1 ? uno : varios);
         const soloLectura = reg.estado_validacion_admin === "APROBADO";
         const nObjetivo = objetivosSustento(reg, transitoSoloEsteBulto).length;
         const etiquetaEstado = (t) => {
@@ -2861,7 +2877,7 @@ export default function App() {
                         return (
                           <div key={b.nro_lpn_final} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                             <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: esEste ? 700 : 400 }}>{b.nro_lpn_final}{esEste ? " (este)" : ""}</span>
-                            <span style={{ color: et.fg }}>{et.txt}</span>
+                            <span style={{ color: et.fg }}>{et.txt}{b.sustento_individual ? ", individual" : ""}</span>
                           </div>
                         );
                       })}
@@ -2875,7 +2891,11 @@ export default function App() {
                   <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 16, paddingLeft: 21 }}>
                     {transitoSoloEsteBulto
                       ? "La respuesta se guardará solo en este bulto."
-                      : `La respuesta se guardará en ${nObjetivo} bulto${nObjetivo === 1 ? "" : "s"} de la carga${aprobadosEnCarga > 0 ? `. ${aprobadosEnCarga} ya aprobado${aprobadosEnCarga === 1 ? "" : "s"} no se modifica${aprobadosEnCarga === 1 ? "" : "n"}` : ""}.`}
+                      : [
+                          `La respuesta se guardará en ${nObjetivo} ${plural(nObjetivo, "bulto", "bultos")} de la carga.`,
+                          aprobadosEnCarga > 0 ? `${aprobadosEnCarga} ${plural(aprobadosEnCarga, "ya aprobado no se modifica", "ya aprobados no se modifican")}.` : "",
+                          individualesEnCarga > 0 ? `${individualesEnCarga} con sustento individual ${plural(individualesEnCarga, "se mantiene", "se mantienen")}.` : "",
+                        ].filter(Boolean).join(" ")}
                     {reg.respuesta_transportista ? " Reemplaza la respuesta anterior y vuelve a quedar por validar." : ""}
                   </div>
 
