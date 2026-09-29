@@ -361,6 +361,7 @@ export default function App() {
   // --- Tránsitos (registros_transito) ---
   const [transitos, setTransitos] = useState([]);
   const [transitosLoading, setTransitosLoading] = useState(false);
+  const [transitosErr, setTransitosErr] = useState(""); // error de la consulta, para no confundirlo con "no hay datos"
   const [transitoSustentoModal, setTransitoSustentoModal] = useState(null); // registro sobre el que se abrió el modal
   const [transitoOpcionElegida, setTransitoOpcionElegida] = useState(null); // 'ADJUNTA_SUSTENTO' | 'SIN_SUSTENTO' | null
   const [transitoSoloEsteBulto, setTransitoSoloEsteBulto] = useState(false);
@@ -525,11 +526,26 @@ export default function App() {
     setTransitosLoading(true);
     const meta = session.user.user_metadata;
     const isAdminUser = meta?.role === "admin";
-    let q = supabase.from("registros_transito").select("*").order("nro_carga_final", { ascending: true });
-    if (!isAdminUser && meta?.empresa_id) q = q.eq("proveedor", meta.empresa_id);
-    const { data, error } = await q;
+    // Supabase devuelve como máximo 1000 filas por consulta (límite del API),
+    // así que se lee en páginas de 1000 hasta traer todo. El orden incluye el
+    // LPN (único) para que las páginas no se salten ni repitan filas.
+    const TAM_PAGINA = 1000;
+    let todas = [];
+    let error = null;
+    for (let desde = 0; ; desde += TAM_PAGINA) {
+      let q = supabase.from("registros_transito").select("*")
+        .order("nro_carga_final", { ascending: true })
+        .order("nro_lpn_final", { ascending: true })
+        .range(desde, desde + TAM_PAGINA - 1);
+      if (!isAdminUser && meta?.empresa_id) q = q.eq("proveedor", meta.empresa_id);
+      const { data, error: err } = await q;
+      if (err) { error = err; break; }
+      todas = todas.concat(data || []);
+      if (!data || data.length < TAM_PAGINA) break;
+    }
     if (error) console.error("Error cargando registros_transito:", error);
-    setTransitos(data || []);
+    setTransitosErr(error ? (error.message || "Error desconocido") : "");
+    setTransitos(error ? [] : todas);
     setTransitosLoading(false);
   }, [session]);
 
@@ -1721,9 +1737,11 @@ export default function App() {
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, lineHeight: 1 }}>
-            {isAdmin ? "Seguimiento General de Adicionales" : `${empresa} — Seguimiento de Adicionales`}
+            {vista === "transitos"
+              ? (isAdmin ? "Tránsitos pendientes" : `${empresa} — Tránsitos pendientes`)
+              : (isAdmin ? "Seguimiento General de Adicionales" : `${empresa} — Seguimiento de Adicionales`)}
           </span>
-          {filtrosActivos && (
+          {filtrosActivos && vista !== "transitos" && (
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
           )}
         </div>
@@ -2609,6 +2627,11 @@ export default function App() {
 
           {transitosLoading ? (
             <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>Cargando...</div>
+          ) : transitosErr ? (
+            <div style={{ padding: "10px 14px", background: RED_LIGHT, borderRadius: 8, fontSize: 12, color: RED_DARK, margin: "12px 0" }}>
+              No se pudieron cargar los tránsitos: {transitosErr}{" "}
+              <button onClick={fetchTransitos} style={{ background: "none", border: "none", padding: 0, color: RED_DARK, fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>Reintentar</button>
+            </div>
           ) : transitos.length === 0 ? (
             <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay bultos en ruta con retraso.</div>
           ) : transitosFiltrados.length === 0 ? (
