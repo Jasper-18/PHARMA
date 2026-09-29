@@ -67,6 +67,24 @@ const COLS_TRANSITOS = [
   { key: "estado_validacion_admin", label: "Validación", width: 120 },
 ];
 
+// Estado "real" de un registro de tránsito, combinando las dos columnas.
+// Un bulto sin respuesta del transportista tiene estado_validacion_admin =
+// 'PENDIENTE' por default, pero eso NO significa que haya algo por validar.
+function estadoTransito(r) {
+  if (r.estado_validacion_admin === "APROBADO") return "APROBADO";
+  if (r.estado_validacion_admin === "DESAPROBADO") return "DESAPROBADO";
+  if (r.respuesta_transportista) return "POR_VALIDAR";
+  return "SIN_RESPUESTA";
+}
+
+const FILTROS_ESTADO_TRANSITO = [
+  { key: "TODOS",         label: "Todos" },
+  { key: "SIN_RESPUESTA", label: "Sin respuesta" },
+  { key: "POR_VALIDAR",   label: "Por validar" },
+  { key: "APROBADO",      label: "Aprobados" },
+  { key: "DESAPROBADO",   label: "Desaprobados" },
+];
+
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
   "Foto poco legible",
@@ -350,7 +368,10 @@ export default function App() {
   const [transitoArchivos, setTransitoArchivos] = useState([]); // hasta 2 File
   const [transitoSaving, setTransitoSaving] = useState(false);
   const [transitoErr, setTransitoErr] = useState("");
-  const [transitoValidarModal, setTransitoValidarModal] = useState(null); // { registro, accion: 'APROBADO'|'DESAPROBADO' } (admin)
+  const [transitoValidarModal, setTransitoValidarModal] = useState(null); // { registro, accion: null|'APROBADO'|'DESAPROBADO' } (admin revisa y decide)
+  const [transitoFotosUrls, setTransitoFotosUrls] = useState({}); // { [path]: signedUrl } para previsualizar sustentos
+  const [transitoBusqueda, setTransitoBusqueda] = useState("");
+  const [transitoFiltroEstado, setTransitoFiltroEstado] = useState("TODOS");
   const [transitoMotivoDesaprobacion, setTransitoMotivoDesaprobacion] = useState("");
   const [transitoValidarSaving, setTransitoValidarSaving] = useState(false);
   const [dashProveedor, setDashProveedor] = useState("");
@@ -513,6 +534,27 @@ export default function App() {
   }, [session]);
 
   useEffect(() => { if (session && vista === "transitos") fetchTransitos(); }, [session, vista, fetchTransitos]);
+
+  // Firma las fotos del sustento del registro abierto (en cualquiera de los 2
+  // modales) para poder mostrarlas como miniatura. El bucket es privado, así
+  // que no hay URL pública -- mismo criterio que abrirFoto().
+  useEffect(() => {
+    const r = transitoValidarModal?.registro || transitoSustentoModal;
+    if (!r) return;
+    const paths = [r.foto_url_1, r.foto_url_2].filter(Boolean);
+    if (paths.length === 0) return;
+    let cancelado = false;
+    (async () => {
+      const nuevas = {};
+      for (const path of paths) {
+        const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 600);
+        if (error) console.error("Error firmando foto de tránsito:", error, path);
+        if (data?.signedUrl) nuevas[path] = data.signedUrl;
+      }
+      if (!cancelado) setTransitoFotosUrls(prev => ({ ...prev, ...nuevas }));
+    })();
+    return () => { cancelado = true; };
+  }, [transitoValidarModal?.registro, transitoSustentoModal]); // no depende de 'accion': cambiar de paso en el modal no vuelve a firmar
 
   useEffect(() => {
     if (!session) return;
@@ -871,6 +913,14 @@ export default function App() {
   }
 
   // --- Tránsitos: transportista guarda su respuesta (con o sin sustento) ---
+  // Bultos a los que se aplica la respuesta: el bulto puntual, o toda la carga
+  // EXCEPTO los ya aprobados (un reenvío a nivel carga no debe borrar una
+  // aprobación que el admin ya dio).
+  function objetivosSustento(registro, soloEsteBulto) {
+    if (soloEsteBulto) return transitos.filter(t => t.nro_lpn_final === registro.nro_lpn_final);
+    return transitos.filter(t => t.nro_carga_final === registro.nro_carga_final && t.estado_validacion_admin !== "APROBADO");
+  }
+
   async function handleGuardarSustento(opcion) {
     if (!transitoSustentoModal) return;
     if (opcion === "SIN_SUSTENTO" && !transitoMotivo.trim()) {
@@ -881,17 +931,31 @@ export default function App() {
       setTransitoErr("Adjunta al menos 1 foto.");
       return;
     }
+    const registro = transitoSustentoModal;
+    const objetivos = objetivosSustento(registro, transitoSoloEsteBulto);
+    if (objetivos.length === 0) {
+      setTransitoErr("Todos los bultos de esta carga ya están aprobados.");
+      return;
+    }
     setTransitoSaving(true);
     setTransitoErr("");
     try {
-      const registro = transitoSustentoModal;
       const ahora = new Date().toISOString();
-      const payload = {
+      const email = session.user.email;
+      // Un reenvío deja el registro limpio: vuelve a PENDIENTE, se borra el
+      // veredicto anterior y las fotos vigentes (el historial de fotos queda
+      // en foto_versiones_N, que nunca se borra).
+      const base = {
         respuesta_transportista: opcion,
         motivo_transportista: opcion === "SIN_SUSTENTO" ? transitoMotivo.trim() : null,
         fecha_respuesta_transportista: ahora,
-        subido_por: session.user.email,
-        estado_validacion_admin: "PENDIENTE", // vuelve a pendiente si se estaba resubiendo
+        subido_por: email,
+        estado_validacion_admin: "PENDIENTE",
+        validado_por: null,
+        fecha_validacion: null,
+        motivo_desaprobacion: null,
+        foto_url_1: null,
+        foto_url_2: null,
       };
 
       // El path incluye la carga siempre -- y además el LPN puntual solo si
@@ -901,6 +965,7 @@ export default function App() {
         ? `transitos/${registro.proveedor}/${registro.nro_carga_final}/${registro.nro_lpn_final}`
         : `transitos/${registro.proveedor}/${registro.nro_carga_final}`;
 
+      const paths = [];
       if (opcion === "ADJUNTA_SUSTENTO") {
         for (let idx = 0; idx < Math.min(transitoArchivos.length, 2); idx++) {
           const comprimido = await comprimirImagen(transitoArchivos[idx]);
@@ -908,21 +973,34 @@ export default function App() {
           const path = `${carpetaBase}/sustento_${idx + 1}_${Date.now()}.${ext}`;
           const { error: upErr } = await supabase.storage.from("documentos").upload(path, comprimido, { upsert: true });
           if (upErr) throw upErr;
-          const sufijo = idx + 1;
-          const versionesPrev = registro[`foto_versiones_${sufijo}`] || [];
-          payload[`foto_url_${sufijo}`] = path;
-          payload[`foto_versiones_${sufijo}`] = [...versionesPrev, { v: versionesPrev.length + 1, path, subido_por: session.user.email, subido_en: ahora }];
+          paths.push(path);
         }
+        paths.forEach((path, i) => { base[`foto_url_${i + 1}`] = path; });
       }
 
-      const filtro = transitoSoloEsteBulto
-        ? { columna: "nro_lpn_final", valor: registro.nro_lpn_final }
-        : { columna: "nro_carga_final", valor: registro.nro_carga_final };
+      // El historial de fotos es por bulto: cada bulto conserva el suyo. Se
+      // agrupan los bultos con el mismo historial para hacer un solo UPDATE
+      // por grupo (en la práctica casi siempre es 1 grupo = 1 UPDATE).
+      const grupos = new Map();
+      for (const t of objetivos) {
+        const clave = paths.length ? JSON.stringify([t.foto_versiones_1 || [], t.foto_versiones_2 || []]) : "_";
+        if (!grupos.has(clave)) grupos.set(clave, { muestra: t, lpns: [] });
+        grupos.get(clave).lpns.push(t.nro_lpn_final);
+      }
 
-      const { error } = await supabase.from("registros_transito").update(payload).eq(filtro.columna, filtro.valor);
-      if (error) throw error;
+      const payloadPorLpn = {};
+      for (const { muestra, lpns } of grupos.values()) {
+        const payload = { ...base };
+        paths.forEach((path, i) => {
+          const prev = muestra[`foto_versiones_${i + 1}`] || [];
+          payload[`foto_versiones_${i + 1}`] = [...prev, { v: prev.length + 1, path, subido_por: email, subido_en: ahora }];
+        });
+        const { error } = await supabase.from("registros_transito").update(payload).in("nro_lpn_final", lpns);
+        if (error) throw error;
+        lpns.forEach(l => { payloadPorLpn[l] = payload; });
+      }
 
-      setTransitos(prev => prev.map(t => (t[filtro.columna] === filtro.valor ? { ...t, ...payload } : t)));
+      setTransitos(prev => prev.map(t => (payloadPorLpn[t.nro_lpn_final] ? { ...t, ...payloadPorLpn[t.nro_lpn_final] } : t)));
       setTransitoSustentoModal(null);
     } catch (err) {
       setTransitoErr(err.message || "Error al guardar.");
@@ -931,10 +1009,72 @@ export default function App() {
     }
   }
 
+  function abrirSustentoTransito(r) {
+    setTransitoSustentoModal(r);
+    setTransitoSoloEsteBulto(false);
+    setTransitoOpcionElegida(null);
+    setTransitoMotivo("");
+    setTransitoArchivos([]);
+    setTransitoErr("");
+  }
+
+  function abrirRevisionTransito(r) {
+    setTransitoValidarModal({ registro: r, accion: null });
+    setTransitoMotivoDesaprobacion("");
+  }
+
+  // Bloque reutilizable: muestra lo que el transportista respondió (motivo o
+  // fotos) y, si ya hubo veredicto, el resultado. Lo usan los 2 modales.
+  function renderSustentoTransito(r, { mostrarVeredicto = true } = {}) {
+    const fotos = [r.foto_url_1, r.foto_url_2].filter(Boolean);
+    return (
+      <div>
+        <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8 }}>
+          <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>
+            {r.respuesta_transportista === "ADJUNTA_SUSTENTO" ? "Adjuntó sustento" : "Sin sustento"}
+            {r.fecha_respuesta_transportista ? ` el ${fmtFechaHora(r.fecha_respuesta_transportista)}` : ""}
+            {r.subido_por ? ` por ${r.subido_por}` : ""}
+          </div>
+          {r.respuesta_transportista === "SIN_SUSTENTO" && (
+            <div style={{ fontSize: 12, color: GRAY_900, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{r.motivo_transportista || "—"}</div>
+          )}
+          {r.respuesta_transportista === "ADJUNTA_SUSTENTO" && (
+            fotos.length === 0 ? (
+              <div style={{ fontSize: 12, color: GRAY_500 }}>No se encontraron fotos en el registro.</div>
+            ) : (
+              <div style={{ display: "flex", gap: 8 }}>
+                {fotos.map((path, i) => (
+                  <button key={path} onClick={() => abrirFoto(path)} title="Abrir foto en una pestaña nueva"
+                    style={{ flex: 1, height: 130, padding: 0, border: `0.5px solid ${BORDER}`, borderRadius: 8, background: "white", cursor: "pointer", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {transitoFotosUrls[path]
+                      ? <img src={transitoFotosUrls[path]} alt={`Sustento ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : <span style={{ fontSize: 11, color: GRAY_500 }}>Cargando foto {i + 1}...</span>}
+                  </button>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+        {mostrarVeredicto && r.estado_validacion_admin === "DESAPROBADO" && (
+          <div style={{ marginTop: 8, padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 12, color: RED_DARK, lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>Desaprobado{r.fecha_validacion ? ` el ${fmtFechaHora(r.fecha_validacion)}` : ""}</div>
+            <div style={{ whiteSpace: "pre-wrap" }}>{r.motivo_desaprobacion || "Sin motivo registrado."}</div>
+          </div>
+        )}
+        {mostrarVeredicto && r.estado_validacion_admin === "APROBADO" && (
+          <div style={{ marginTop: 8, padding: "8px 12px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN, fontWeight: 600 }}>
+            Aprobado{r.fecha_validacion ? ` el ${fmtFechaHora(r.fecha_validacion)}` : ""}{r.validado_por ? ` por ${r.validado_por}` : ""}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // --- Tránsitos: admin aprueba/desaprueba (con confirmación) ---
   async function handleValidarTransito() {
     if (!transitoValidarModal) return;
     const { registro, accion } = transitoValidarModal;
+    if (accion !== "APROBADO" && accion !== "DESAPROBADO") return;
     if (accion === "DESAPROBADO" && !transitoMotivoDesaprobacion.trim()) {
       return; // el modal ya exige el motivo antes de habilitar el botón
     }
@@ -2422,44 +2562,96 @@ export default function App() {
         </div>
       )}
 
-      {vista === "transitos" && enPilotoTransitos && (
+      {vista === "transitos" && enPilotoTransitos && (() => {
+        const colsTransitos = isAdmin
+          ? [{ key: "proveedor", label: "Transportista", width: 110 }, ...COLS_TRANSITOS]
+          : COLS_TRANSITOS;
+        const conteoEstados = transitos.reduce((acc, r) => { const e = estadoTransito(r); acc[e] = (acc[e] || 0) + 1; return acc; }, {});
+        const q = transitoBusqueda.trim().toLowerCase();
+        const transitosFiltrados = transitos.filter(r => {
+          if (transitoFiltroEstado !== "TODOS" && estadoTransito(r) !== transitoFiltroEstado) return false;
+          if (!q) return true;
+          return [r.nro_carga_final, r.nro_lpn_final, r.nombre_instalacion_final, r.nombre_ruta_consolidada, isAdmin ? r.proveedor : null]
+            .some(v => String(v ?? "").toLowerCase().includes(q));
+        });
+        const badge = (bg, fg, label) => (
+          <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>
+        );
+        const btnFila = { padding: "5px 12px", background: "white", border: `1px solid ${BORDER}`, borderRadius: 7, fontSize: 11, fontWeight: 500, color: GRAY_900, cursor: "pointer", whiteSpace: "nowrap" };
+        return (
         <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
-          <div style={{ marginBottom: 18 }}>
+          <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Tránsitos</div>
-            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>Bultos en tránsito con retraso -- el sustento se registra a nivel de carga</div>
+            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>
+              {isAdmin
+                ? "Bultos en ruta con retraso. Revisa el sustento de cada bulto y apruébalo o desapruébalo."
+                : "Bultos en ruta con retraso. Sustenta cada carga completa, o un bulto puntual si el sustento es parcial."}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <input value={transitoBusqueda} onChange={e => setTransitoBusqueda(e.target.value)}
+              placeholder={isAdmin ? "Buscar carga, LPN, instalación, ruta o transportista" : "Buscar carga, LPN, instalación o ruta"}
+              style={{ ...inp, width: 300, maxWidth: "100%" }} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {FILTROS_ESTADO_TRANSITO.map(f => {
+                const activo = transitoFiltroEstado === f.key;
+                const n = f.key === "TODOS" ? transitos.length : (conteoEstados[f.key] || 0);
+                return (
+                  <button key={f.key} onClick={() => setTransitoFiltroEstado(f.key)} aria-pressed={activo}
+                    style={{ padding: "5px 10px", borderRadius: 999, border: `0.5px solid ${activo ? RED : BORDER}`, background: activo ? RED_LIGHT : "white", color: activo ? RED_DARK : GRAY_900, fontSize: 11, fontWeight: activo ? 600 : 500, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    {f.label} <span style={{ color: activo ? RED_DARK : GRAY_500 }}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {transitosLoading ? (
             <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>Cargando...</div>
           ) : transitos.length === 0 ? (
-            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay registros.</div>
+            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay bultos en ruta con retraso.</div>
+          ) : transitosFiltrados.length === 0 ? (
+            <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>
+              Ningún bulto coincide con la búsqueda o el filtro.{" "}
+              <button onClick={() => { setTransitoBusqueda(""); setTransitoFiltroEstado("TODOS"); }}
+                style={{ background: "none", border: "none", padding: 0, color: RED_DARK, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>Limpiar filtros</button>
+            </div>
           ) : (
             <div style={{ background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 10, overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: GRAY_50, borderBottom: `0.5px solid ${BORDER}` }}>
-                    {COLS_TRANSITOS.map(c => (
+                    {colsTransitos.map(c => (
                       <th key={c.key} style={{ textAlign: "left", padding: "9px 12px", color: GRAY_500, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap" }}>{c.label}</th>
                     ))}
                     <th style={{ padding: "9px 12px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {transitos.map(r => (
+                  {transitosFiltrados.map(r => {
+                    const estado = estadoTransito(r);
+                    return (
                     <tr key={r.nro_lpn_final} style={{ borderBottom: `0.5px solid ${GRAY_100}` }}>
-                      {COLS_TRANSITOS.map(c => {
+                      {colsTransitos.map(c => {
                         let content;
                         if (c.key === "respuesta_transportista") {
                           const val = r.respuesta_transportista;
-                          const bg = val === "ADJUNTA_SUSTENTO" ? GREEN_LIGHT : val === "SIN_SUSTENTO" ? AMBER_LIGHT : GRAY_100;
-                          const fg = val === "ADJUNTA_SUSTENTO" ? GREEN : val === "SIN_SUSTENTO" ? AMBER : GRAY_500;
-                          const label = val === "ADJUNTA_SUSTENTO" ? "CON SUSTENTO" : val === "SIN_SUSTENTO" ? "SIN SUSTENTO" : "PENDIENTE";
-                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>;
+                          content = val === "ADJUNTA_SUSTENTO" ? badge(GREEN_LIGHT, GREEN, "CON SUSTENTO")
+                            : val === "SIN_SUSTENTO" ? badge(AMBER_LIGHT, AMBER, "SIN SUSTENTO")
+                            : badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
                         } else if (c.key === "estado_validacion_admin") {
-                          const val = r.estado_validacion_admin;
-                          const bg = val === "APROBADO" ? GREEN_LIGHT : val === "DESAPROBADO" ? RED_LIGHT : AMBER_LIGHT;
-                          const fg = val === "APROBADO" ? GREEN : val === "DESAPROBADO" ? RED_DARK : AMBER;
-                          content = <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{val}</span>;
+                          if (estado === "SIN_RESPUESTA") content = <span style={{ color: GRAY_200 }}>—</span>;
+                          else if (estado === "POR_VALIDAR") content = badge(AMBER_LIGHT, AMBER, "POR VALIDAR");
+                          else if (estado === "APROBADO") content = badge(GREEN_LIGHT, GREEN, "APROBADO");
+                          else content = (
+                            <div>
+                              {badge(RED_LIGHT, RED_DARK, "DESAPROBADO")}
+                              {r.motivo_desaprobacion && (
+                                <div title={r.motivo_desaprobacion} style={{ fontSize: 11, color: RED_DARK, marginTop: 3, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{r.motivo_desaprobacion}</div>
+                              )}
+                            </div>
+                          );
                         } else if (c.key === "costo_total") {
                           content = r.costo_total != null ? Number(r.costo_total).toFixed(2) : "—";
                         } else if (c.key === "fecha_limite_transp") {
@@ -2467,36 +2659,37 @@ export default function App() {
                         } else {
                           content = (r[c.key] ?? "—");
                         }
-                        return <td key={c.key} style={{ padding: "9px 12px", color: GRAY_900, fontFamily: c.mono ? "monospace" : "inherit", whiteSpace: "nowrap" }}>{content}</td>;
+                        return <td key={c.key} style={{ padding: "9px 12px", color: GRAY_900, fontFamily: c.mono ? "monospace" : "inherit", whiteSpace: "nowrap", verticalAlign: "top" }}>{content}</td>;
                       })}
-                      <td style={{ padding: "9px 12px" }}>
+                      <td style={{ padding: "9px 12px", verticalAlign: "top" }}>
                         {!isAdmin && (
-                          <button onClick={() => { setTransitoSustentoModal(r); setTransitoSoloEsteBulto(false); setTransitoOpcionElegida(null); setTransitoMotivo(""); setTransitoArchivos([]); setTransitoErr(""); }}
-                            style={{ padding: "5px 12px", background: "white", border: `1px solid ${BORDER}`, borderRadius: 7, fontSize: 11, fontWeight: 500, color: GRAY_900, cursor: "pointer", whiteSpace: "nowrap" }}>
-                            Sustentar
+                          <button onClick={() => abrirSustentoTransito(r)} style={btnFila}>
+                            {estado === "SIN_RESPUESTA" ? "Sustentar"
+                              : estado === "POR_VALIDAR" ? "Modificar"
+                              : estado === "DESAPROBADO" ? "Volver a sustentar"
+                              : "Ver"}
                           </button>
                         )}
-                        {isAdmin && r.estado_validacion_admin === "PENDIENTE" && r.respuesta_transportista && (
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button onClick={() => setTransitoValidarModal({ registro: r, accion: "APROBADO" })} title="Aprobar"
-                              style={{ width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${GREEN}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                            </button>
-                            <button onClick={() => { setTransitoValidarModal({ registro: r, accion: "DESAPROBADO" }); setTransitoMotivoDesaprobacion(""); }} title="Desaprobar"
-                              style={{ width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${RED}`, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                            </button>
-                          </div>
+                        {isAdmin && estado === "POR_VALIDAR" && (
+                          <button onClick={() => abrirRevisionTransito(r)} style={{ ...btnFila, border: `1px solid ${RED}`, color: RED_DARK, fontWeight: 600 }}>Revisar</button>
+                        )}
+                        {isAdmin && (estado === "APROBADO" || estado === "DESAPROBADO") && (
+                          <button onClick={() => abrirRevisionTransito(r)} style={btnFila}>Ver</button>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
+          {!transitosLoading && transitosFiltrados.length > 0 && transitosFiltrados.length !== transitos.length && (
+            <div style={{ fontSize: 11, color: GRAY_500, marginTop: 8 }}>Mostrando {transitosFiltrados.length} de {transitos.length} bultos</div>
+          )}
         </div>
-      )}
+        );
+      })()}
 
         </div>
       </div>
@@ -2600,85 +2793,129 @@ export default function App() {
       )}
 
       {transitoSustentoModal && (() => {
-        const bultosDeLaCarga = transitos.filter(t => t.nro_carga_final === transitoSustentoModal.nro_carga_final);
+        const reg = transitoSustentoModal;
+        const bultosDeLaCarga = transitos.filter(t => t.nro_carga_final === reg.nro_carga_final);
+        const aprobadosEnCarga = bultosDeLaCarga.filter(t => t.estado_validacion_admin === "APROBADO").length;
+        const soloLectura = reg.estado_validacion_admin === "APROBADO";
+        const nObjetivo = objetivosSustento(reg, transitoSoloEsteBulto).length;
+        const etiquetaEstado = (t) => {
+          const e = estadoTransito(t);
+          return e === "APROBADO" ? { txt: "Aprobado", fg: GREEN }
+            : e === "DESAPROBADO" ? { txt: "Desaprobado", fg: RED_DARK }
+            : e === "POR_VALIDAR" ? { txt: "Por validar", fg: AMBER }
+            : { txt: "Sin respuesta", fg: GRAY_500 };
+        };
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
             onClick={e => e.target === e.currentTarget && !transitoSaving && setTransitoSustentoModal(null)}>
-            <div style={{ background: "white", borderRadius: 14, padding: 24, width: 420, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ background: "white", borderRadius: 14, padding: 24, width: 460, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>Sustentar carga</div>
-                <button onClick={() => setTransitoSustentoModal(null)} disabled={transitoSaving} style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{soloLectura ? "Sustento aprobado" : reg.respuesta_transportista ? "Actualizar sustento" : "Sustentar carga"}</div>
+                <button onClick={() => setTransitoSustentoModal(null)} disabled={transitoSaving} aria-label="Cerrar" style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
-              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, fontFamily: "monospace" }}>{transitoSustentoModal.nro_carga_final}</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14 }}>
+                Carga <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_carga_final}</span>
+                {", "}bulto <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_lpn_final}</span>
+              </div>
 
-              <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8, marginBottom: 16 }}>
-                <div style={{ fontSize: 10, color: GRAY_500, fontWeight: 500, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-                  Esta carga tiene {bultosDeLaCarga.length} bulto(s)
+              {reg.respuesta_transportista && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>Sustento actual de este bulto</div>
+                  {renderSustentoTransito(reg)}
                 </div>
-                <div style={{ fontSize: 11, color: GRAY_900, fontFamily: "monospace", lineHeight: 1.6, maxHeight: 90, overflowY: "auto" }}>
-                  {bultosDeLaCarga.map(b => (
-                    <div key={b.nro_lpn_final} style={{ fontWeight: b.nro_lpn_final === transitoSustentoModal.nro_lpn_final ? 700 : 400 }}>
-                      {b.nro_lpn_final}{b.nro_lpn_final === transitoSustentoModal.nro_lpn_final ? " (este)" : ""}
+              )}
+
+              {!soloLectura && (
+                <>
+                  <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8, marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>
+                      Bultos de esta carga ({bultosDeLaCarga.length})
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div style={{ fontSize: 11, lineHeight: 1.7, maxHeight: 120, overflowY: "auto" }}>
+                      {bultosDeLaCarga.map(b => {
+                        const esEste = b.nro_lpn_final === reg.nro_lpn_final;
+                        const et = etiquetaEstado(b);
+                        return (
+                          <div key={b.nro_lpn_final} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: esEste ? 700 : 400 }}>{b.nro_lpn_final}{esEste ? " (este)" : ""}</span>
+                            <span style={{ color: et.fg }}>{et.txt}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
-                <input type="checkbox" checked={transitoSoloEsteBulto} onChange={e => setTransitoSoloEsteBulto(e.target.checked)} />
-                Aplicar solo a este bulto ({transitoSustentoModal.nro_lpn_final}) -- para sustento parcial
-              </label>
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
+                    <input type="checkbox" checked={transitoSoloEsteBulto} onChange={e => { setTransitoSoloEsteBulto(e.target.checked); setTransitoErr(""); }} style={{ marginTop: 2 }} />
+                    <span>Aplicar solo a este bulto ({reg.nro_lpn_final}), para un sustento parcial</span>
+                  </label>
+                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 16, paddingLeft: 21 }}>
+                    {transitoSoloEsteBulto
+                      ? "La respuesta se guardará solo en este bulto."
+                      : `La respuesta se guardará en ${nObjetivo} bulto${nObjetivo === 1 ? "" : "s"} de la carga${aprobadosEnCarga > 0 ? `. ${aprobadosEnCarga} ya aprobado${aprobadosEnCarga === 1 ? "" : "s"} no se modifica${aprobadosEnCarga === 1 ? "" : "n"}` : ""}.`}
+                    {reg.respuesta_transportista ? " Reemplaza la respuesta anterior y vuelve a quedar por validar." : ""}
+                  </div>
 
-              {!transitoOpcionElegida ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <button onClick={() => setTransitoOpcionElegida("ADJUNTA_SUSTENTO")}
-                    style={{ padding: "10px 0", background: GREEN, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                    Adjuntar sustento
-                  </button>
-                  <button onClick={() => setTransitoOpcionElegida("SIN_SUSTENTO")}
-                    style={{ padding: "10px 0", background: "white", color: GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
-                    No cuenta con sustento
-                  </button>
-                </div>
-              ) : transitoOpcionElegida === "ADJUNTA_SUSTENTO" ? (
-                <div>
-                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Adjunta hasta 2 fotos:</div>
-                  <input type="file" accept="image/*" multiple
-                    onChange={e => setTransitoArchivos(Array.from(e.target.files).slice(0, 2))}
-                    style={{ fontSize: 12, marginBottom: 10 }} />
-                  {transitoArchivos.length > 0 && (
-                    <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 10 }}>
-                      {transitoArchivos.map((f, i) => <div key={i}>📎 {f.name}</div>)}
+                  {!transitoOpcionElegida ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <button onClick={() => setTransitoOpcionElegida("ADJUNTA_SUSTENTO")} disabled={nObjetivo === 0}
+                        style={{ padding: "10px 0", background: nObjetivo === 0 ? GRAY_200 : GREEN, color: nObjetivo === 0 ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: nObjetivo === 0 ? "default" : "pointer" }}>
+                        Adjuntar sustento
+                      </button>
+                      <button onClick={() => setTransitoOpcionElegida("SIN_SUSTENTO")} disabled={nObjetivo === 0}
+                        style={{ padding: "10px 0", background: "white", color: nObjetivo === 0 ? GRAY_500 : GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: nObjetivo === 0 ? "default" : "pointer" }}>
+                        No cuenta con sustento
+                      </button>
+                    </div>
+                  ) : transitoOpcionElegida === "ADJUNTA_SUSTENTO" ? (
+                    <div>
+                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Adjunta hasta 2 fotos:</div>
+                      <input type="file" accept="image/*" multiple
+                        onChange={e => { setTransitoArchivos(Array.from(e.target.files).slice(0, 2)); setTransitoErr(""); }}
+                        style={{ fontSize: 12, marginBottom: 10 }} />
+                      {transitoArchivos.length > 0 && (
+                        <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 10 }}>
+                          {transitoArchivos.map((f, i) => <div key={i}>📎 {f.name}</div>)}
+                        </div>
+                      )}
+                      {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => { setTransitoOpcionElegida(null); setTransitoArchivos([]); setTransitoErr(""); }} disabled={transitoSaving}
+                          style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
+                          Atrás
+                        </button>
+                        <button onClick={() => handleGuardarSustento("ADJUNTA_SUSTENTO")} disabled={transitoSaving}
+                          style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : GREEN, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
+                          {transitoSaving ? "Guardando..." : "Guardar sustento"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Explica por qué no cuenta con sustento:</div>
+                      <textarea value={transitoMotivo} onChange={e => { setTransitoMotivo(e.target.value); setTransitoErr(""); }} rows={3}
+                        style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }} />
+                      {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => { setTransitoOpcionElegida(null); setTransitoErr(""); }} disabled={transitoSaving}
+                          style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
+                          Atrás
+                        </button>
+                        <button onClick={() => handleGuardarSustento("SIN_SUSTENTO")} disabled={transitoSaving}
+                          style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : RED, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
+                          {transitoSaving ? "Guardando..." : "Guardar respuesta"}
+                        </button>
+                      </div>
                     </div>
                   )}
-                  {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => { setTransitoOpcionElegida(null); setTransitoArchivos([]); setTransitoErr(""); }} disabled={transitoSaving}
-                      style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
-                      Atrás
-                    </button>
-                    <button onClick={() => handleGuardarSustento("ADJUNTA_SUSTENTO")} disabled={transitoSaving}
-                      style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : GREEN, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
-                      {transitoSaving ? "Guardando..." : "Guardar"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Explica por qué no cuenta con sustento:</div>
-                  <textarea value={transitoMotivo} onChange={e => { setTransitoMotivo(e.target.value); setTransitoErr(""); }} rows={3}
-                    style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }} />
-                  {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => { setTransitoOpcionElegida(null); setTransitoErr(""); }} disabled={transitoSaving}
-                      style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
-                      Atrás
-                    </button>
-                    <button onClick={() => handleGuardarSustento("SIN_SUSTENTO")} disabled={transitoSaving}
-                      style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : RED, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
-                      {transitoSaving ? "Guardando..." : "Guardar"}
-                    </button>
-                  </div>
+                  {!transitoOpcionElegida && transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginTop: 10 }}>⚠ {transitoErr}</div>}
+                </>
+              )}
+
+              {soloLectura && (
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button onClick={() => setTransitoSustentoModal(null)}
+                    style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cerrar</button>
                 </div>
               )}
             </div>
@@ -2686,48 +2923,66 @@ export default function App() {
         );
       })()}
 
-      {transitoValidarModal && (
+      {transitoValidarModal && (() => {
+        const reg = transitoValidarModal.registro;
+        const accion = transitoValidarModal.accion;
+        const porValidar = estadoTransito(reg) === "POR_VALIDAR";
+        const cerrar = () => !transitoValidarSaving && setTransitoValidarModal(null);
+        const btnSec = { padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 };
+        const deshabilitado = transitoValidarSaving || (accion === "DESAPROBADO" && !transitoMotivoDesaprobacion.trim());
+        return (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
-          onClick={e => e.target === e.currentTarget && !transitoValidarSaving && setTransitoValidarModal(null)}>
-          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", background: transitoValidarModal.accion === "APROBADO" ? GREEN_LIGHT : RED_LIGHT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {transitoValidarModal.accion === "APROBADO" ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                )}
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>
-                  {transitoValidarModal.accion === "APROBADO" ? "Aprobar sustento" : "Desaprobar sustento"}
-                </div>
-                <div style={{ fontSize: 12, color: GRAY_500 }}>
-                  Bulto <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: 500 }}>{transitoValidarModal.registro.nro_lpn_final}</span>
-                  {" "}(carga {transitoValidarModal.registro.nro_carga_final})
-                </div>
-              </div>
+          onClick={e => e.target === e.currentTarget && cerrar()}>
+          <div style={{ background: "white", borderRadius: 14, padding: 24, width: 480, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>{porValidar ? "Revisar sustento" : "Sustento del bulto"}</div>
+              <button onClick={cerrar} disabled={transitoValidarSaving} aria-label="Cerrar" style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14, lineHeight: 1.6 }}>
+              Bulto <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_lpn_final}</span>
+              {", "}carga <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_carga_final}</span>
+              <br />
+              {reg.proveedor || "—"}{reg.nombre_instalacion_final ? `, ${reg.nombre_instalacion_final}` : ""}
+              {reg.fecha_limite_transp ? `, fecha límite ${fmtFechaSolo(reg.fecha_limite_transp)}` : ""}
             </div>
 
-            {transitoValidarModal.accion === "DESAPROBADO" && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Motivo de la desaprobación:</div>
-                <textarea value={transitoMotivoDesaprobacion} onChange={e => setTransitoMotivoDesaprobacion(e.target.value)} rows={3}
-                  style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontFamily: "inherit", resize: "vertical" }} />
+            <div style={{ marginBottom: 16 }}>{renderSustentoTransito(reg)}</div>
+
+            {!porValidar ? (
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={cerrar} style={btnSec}>Cerrar</button>
+              </div>
+            ) : !accion ? (
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => { setTransitoValidarModal({ registro: reg, accion: "DESAPROBADO" }); setTransitoMotivoDesaprobacion(""); }}
+                  style={{ padding: "7px 20px", border: `1px solid ${RED}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", background: "white", color: RED_DARK }}>Desaprobar</button>
+                <button onClick={() => setTransitoValidarModal({ registro: reg, accion: "APROBADO" })}
+                  style={{ padding: "7px 20px", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", background: GREEN, color: "white" }}>Aprobar</button>
+              </div>
+            ) : (
+              <div style={{ borderTop: `0.5px solid ${BORDER}`, paddingTop: 14 }}>
+                {accion === "DESAPROBADO" ? (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>Motivo de la desaprobación (lo verá el transportista):</div>
+                    <textarea autoFocus value={transitoMotivoDesaprobacion} onChange={e => setTransitoMotivoDesaprobacion(e.target.value)} rows={3}
+                      style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, fontFamily: "inherit", resize: "vertical" }} />
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: GRAY_900, marginBottom: 12 }}>¿Confirmas la aprobación del sustento de este bulto?</div>
+                )}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button onClick={() => setTransitoValidarModal({ registro: reg, accion: null })} disabled={transitoValidarSaving} style={btnSec}>Atrás</button>
+                  <button onClick={handleValidarTransito} disabled={deshabilitado}
+                    style={{ padding: "7px 20px", background: deshabilitado ? GRAY_200 : (accion === "APROBADO" ? GREEN : RED), color: deshabilitado ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: deshabilitado ? "default" : "pointer" }}>
+                    {transitoValidarSaving ? "Guardando..." : (accion === "APROBADO" ? "Confirmar aprobación" : "Confirmar desaprobación")}
+                  </button>
+                </div>
               </div>
             )}
-
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setTransitoValidarModal(null)} disabled={transitoValidarSaving}
-                style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cancelar</button>
-              <button onClick={handleValidarTransito} disabled={transitoValidarSaving || (transitoValidarModal.accion === "DESAPROBADO" && !transitoMotivoDesaprobacion.trim())}
-                style={{ padding: "7px 20px", background: transitoValidarSaving ? GRAY_200 : (transitoValidarModal.accion === "APROBADO" ? GREEN : RED), color: transitoValidarSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoValidarSaving ? "default" : "pointer" }}>
-                {transitoValidarSaving ? "Guardando..." : (transitoValidarModal.accion === "APROBADO" ? "Sí, aprobar" : "Sí, desaprobar")}
-              </button>
-            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {cotizacionDetalleModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
