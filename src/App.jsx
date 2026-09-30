@@ -1748,7 +1748,7 @@ export default function App() {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, lineHeight: 1 }}>
             {vista === "transitos"
-              ? (isAdmin ? "Tránsitos pendientes" : `${empresa} — Tránsitos pendientes`)
+              ? (isAdmin ? "Seguimiento de tránsitos pendientes" : `${empresa} — Tránsitos pendientes`)
               : (isAdmin ? "Seguimiento General de Adicionales" : `${empresa} — Seguimiento de Adicionales`)}
           </span>
           {filtrosActivos && vista !== "transitos" && (
@@ -2608,14 +2608,16 @@ export default function App() {
         const btnFila = { padding: "5px 12px", background: "white", border: `1px solid ${BORDER}`, borderRadius: 7, fontSize: 11, fontWeight: 500, color: GRAY_900, cursor: "pointer", whiteSpace: "nowrap" };
         return (
         <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Tránsitos</div>
-            <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>
-              {isAdmin
-                ? "Bultos en ruta con retraso. Revisa el sustento de cada bulto y apruébalo o desapruébalo."
-                : "Bultos en ruta con retraso. Sustenta cada carga completa, o un bulto puntual si el sustento es parcial."}
+          {/* El admin ya tiene el título en la barra superior; el encabezado
+              con la explicación queda solo para el transportista. */}
+          {!isAdmin && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Tránsitos</div>
+              <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>
+                Bultos en ruta con retraso. Sustenta cada carga completa, o un bulto puntual si el sustento es parcial.
+              </div>
             </div>
-          </div>
+          )}
 
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <input value={transitoBusqueda} onChange={e => setTransitoBusqueda(e.target.value)}
