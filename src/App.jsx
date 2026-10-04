@@ -65,26 +65,64 @@ const COLS_TRANSITOS = [
   { key: "tipo_mercaderia",     label: "Tipo Mercadería", width: 110 },
   { key: "costo_total",         label: "Costo",      width: 90 },
   { key: "fecha_limite_transp", label: "Fecha Límite", width: 110 },
-  { key: "respuesta_transportista", label: "Sustento",   width: 140 },
+  { key: "respuesta_transportista", label: "Estatus",    width: 140 },
+  { key: "estado_validacion_ia",    label: "Validación IA", width: 120 },
   { key: "estado_validacion_admin", label: "Validación", width: 120 },
 ];
 
-// Estado "real" de un registro de tránsito, combinando las dos columnas.
+// Estatus que elige el transportista para cada bulto. Los que requieren foto
+// pasan por la lectura automática (api/procesar-sustento-transitos.js): si la
+// IA encuentra el N° de LPN en la foto, el bulto se aprueba solo; si no, queda
+// por validar para el admin. Los que no requieren foto no pasan por la IA.
+const ESTATUS_TRANSITO = [
+  { key: "INGRESO_CONFORME",  label: "Ingreso conforme",     requiereFoto: true,  bg: GREEN_LIGHT, fg: GREEN,
+    ayuda: "Voucher impreso donde aparezca el N° de LPN." },
+  { key: "ENTREGA_MANUAL",    label: "Entrega manual",       requiereFoto: true,  bg: BLUE_LIGHT,  fg: BLUE,
+    ayuda: "Hoja con el N° de LPN escrito a mano. Escríbelo claro y en tamaño grande." },
+  { key: "DERIVADO",          label: "Derivado",             requiereFoto: true,  bg: BLUE_LIGHT,  fg: BLUE,
+    ayuda: "Voucher o anotación a mano donde aparezca el N° de LPN." },
+  { key: "PENDIENTE_ENTREGA", label: "Pendiente de entrega", requiereFoto: false, bg: AMBER_LIGHT, fg: AMBER,
+    ayuda: "Aún no se entrega. No lleva foto; actualiza el estatus cuando se entregue." },
+  { key: "SINIESTRO",         label: "Siniestro",            requiereFoto: false, bg: RED_LIGHT,   fg: RED_DARK,
+    ayuda: "Queda registrado como no sustentado. No lleva foto." },
+];
+const ESTATUS_TRANSITO_POR_KEY = Object.fromEntries(ESTATUS_TRANSITO.map(e => [e.key, e]));
+
+// Mismo criterio que PharmaSPOT: cada subida de foto cuenta como un intento.
+// Al llegar a 3 sin que la IA encuentre el LPN, se bloquea la resubida y el
+// bulto queda en manos del admin.
+const MAX_INTENTOS_IA_TRANSITO = 3;
+
+// Estado "real" de un registro de tránsito, combinando las columnas.
 // Un bulto sin respuesta del transportista tiene estado_validacion_admin =
 // 'PENDIENTE' por default, pero eso NO significa que haya algo por validar.
+// NO_SUSTENTADO y PENDIENTE_ENTREGA se derivan del estatus del transportista
+// (no se guardan en estado_validacion_admin) porque no pasan por validación.
 function estadoTransito(r) {
   if (r.estado_validacion_admin === "APROBADO") return "APROBADO";
   if (r.estado_validacion_admin === "DESAPROBADO") return "DESAPROBADO";
+  if (r.estatus_transportista === "SINIESTRO") return "NO_SUSTENTADO";
+  if (r.estatus_transportista === "PENDIENTE_ENTREGA") return "PENDIENTE_ENTREGA";
   if (r.respuesta_transportista) return "POR_VALIDAR";
   return "SIN_RESPUESTA";
 }
 
+// Bulto por validar que ya agotó sus intentos de foto: el transportista ya
+// no puede resubir, solo el admin lo resuelve.
+function transitoBloqueadoIA(r) {
+  return estadoTransito(r) === "POR_VALIDAR"
+    && (r.intentos_ia || 0) >= MAX_INTENTOS_IA_TRANSITO
+    && r.estado_validacion_ia !== "COINCIDE";
+}
+
 const FILTROS_ESTADO_TRANSITO = [
-  { key: "TODOS",         label: "Todos" },
-  { key: "SIN_RESPUESTA", label: "Sin respuesta" },
-  { key: "POR_VALIDAR",   label: "Por validar" },
-  { key: "APROBADO",      label: "Aprobados" },
-  { key: "DESAPROBADO",   label: "Desaprobados" },
+  { key: "TODOS",             label: "Todos" },
+  { key: "SIN_RESPUESTA",     label: "Sin respuesta" },
+  { key: "PENDIENTE_ENTREGA", label: "Pendiente de entrega" },
+  { key: "POR_VALIDAR",       label: "Por validar" },
+  { key: "APROBADO",          label: "Aprobados" },
+  { key: "DESAPROBADO",       label: "Desaprobados" },
+  { key: "NO_SUSTENTADO",     label: "No sustentados" },
 ];
 
 const MOTIVOS_VALIDACION = [
@@ -365,7 +403,8 @@ export default function App() {
   const [transitosLoading, setTransitosLoading] = useState(false);
   const [transitosErr, setTransitosErr] = useState(""); // error de la consulta, para no confundirlo con "no hay datos"
   const [transitoSustentoModal, setTransitoSustentoModal] = useState(null); // registro sobre el que se abrió el modal
-  const [transitoOpcionElegida, setTransitoOpcionElegida] = useState(null); // 'ADJUNTA_SUSTENTO' | 'SIN_SUSTENTO' | null
+  const [transitoOpcionElegida, setTransitoOpcionElegida] = useState(null); // key de ESTATUS_TRANSITO | null
+  const [transitoResultadoIA, setTransitoResultadoIA] = useState(null); // null | { validando: true } | { resultados: [...] | null, lpnsFoto: [...] }
   const [transitoSoloEsteBulto, setTransitoSoloEsteBulto] = useState(false);
   const [transitoMotivo, setTransitoMotivo] = useState("");
   const [transitoArchivos, setTransitoArchivos] = useState([]); // hasta 2 File
@@ -930,36 +969,58 @@ export default function App() {
     }
   }
 
-  // --- Tránsitos: transportista guarda su respuesta (con o sin sustento) ---
+  // --- Tránsitos: transportista guarda su respuesta (estatus + fotos) ---
   // Bultos a los que se aplica la respuesta: el bulto puntual, o toda la carga
-  // EXCEPTO (a) los ya aprobados -- un reenvío no debe borrar una aprobación
-  // que el admin ya dio -- y (b) los que tienen un sustento individual propio
-  // ("solo este bulto"): un sustento a nivel carga no los pisa. El bulto desde
-  // el que se abrió el modal sí entra si el usuario desmarcó "solo este
-  // bulto", porque ahí la intención de pasarlo a nivel carga es explícita.
+  // EXCEPTO:
+  //  (a) los ya aprobados: un reenvío no debe borrar una aprobación;
+  //  (b) los que tienen un sustento individual propio ("solo este bulto"): un
+  //      sustento a nivel carga no los pisa. El bulto desde el que se abrió el
+  //      modal sí entra si el usuario desmarcó "solo este bulto";
+  //  (c) los bloqueados por intentos de IA: ya solo los resuelve el admin.
   function objetivosSustento(registro, soloEsteBulto) {
     if (soloEsteBulto) return transitos.filter(t => t.nro_lpn_final === registro.nro_lpn_final);
     return transitos.filter(t =>
       t.nro_carga_final === registro.nro_carga_final &&
       t.estado_validacion_admin !== "APROBADO" &&
+      !transitoBloqueadoIA(t) &&
       (!t.sustento_individual || t.nro_lpn_final === registro.nro_lpn_final)
     );
   }
 
-  async function handleGuardarSustento(opcion) {
-    if (!transitoSustentoModal) return;
-    if (opcion === "SIN_SUSTENTO" && !transitoMotivo.trim()) {
-      setTransitoErr("Explica por qué no cuenta con sustento.");
-      return;
+  // Llama al endpoint de lectura automática. Igual que en PharmaSPOT, si falla
+  // devuelve null y el flujo sigue: las fotos ya quedaron guardadas y el bulto
+  // queda por validar para el admin.
+  async function validarSustentoConIA(lpns) {
+    try {
+      const resp = await fetch("/api/procesar-sustento-transitos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ lpns }),
+      });
+      if (!resp.ok) {
+        console.error("procesar-sustento-transitos respondió", resp.status, await resp.text().catch(() => ""));
+        return null;
+      }
+      const json = await resp.json();
+      return Array.isArray(json.resultados) ? json.resultados : null;
+    } catch (err) {
+      console.error("Error llamando a procesar-sustento-transitos:", err);
+      return null;
     }
-    if (opcion === "ADJUNTA_SUSTENTO" && transitoArchivos.length === 0) {
-      setTransitoErr("Adjunta al menos 1 foto.");
+  }
+
+  async function handleGuardarSustento(estatusKey) {
+    if (!transitoSustentoModal) return;
+    const def = ESTATUS_TRANSITO_POR_KEY[estatusKey];
+    if (!def) return;
+    if (def.requiereFoto && transitoArchivos.length === 0) {
+      setTransitoErr("Adjunta al menos 1 foto donde se vea el N° de LPN.");
       return;
     }
     const registro = transitoSustentoModal;
     const objetivos = objetivosSustento(registro, transitoSoloEsteBulto);
     if (objetivos.length === 0) {
-      setTransitoErr("No quedan bultos por sustentar en esta carga: están aprobados o tienen sustento individual.");
+      setTransitoErr("No quedan bultos por sustentar en esta carga: están aprobados, tienen sustento individual o ya los revisa el admin.");
       return;
     }
     setTransitoSaving(true);
@@ -968,11 +1029,14 @@ export default function App() {
       const ahora = new Date().toISOString();
       const email = session.user.email;
       // Un reenvío deja el registro limpio: vuelve a PENDIENTE, se borra el
-      // veredicto anterior y las fotos vigentes (el historial de fotos queda
-      // en foto_versiones_N, que nunca se borra).
+      // veredicto anterior, las fotos vigentes y la lectura de IA anterior
+      // (el historial de fotos queda en foto_versiones_N, que nunca se borra).
+      // respuesta_transportista se sigue llenando para no romper registros
+      // antiguos: con foto = ADJUNTA_SUSTENTO, sin foto = SIN_SUSTENTO.
       const base = {
-        respuesta_transportista: opcion,
-        motivo_transportista: opcion === "SIN_SUSTENTO" ? transitoMotivo.trim() : null,
+        estatus_transportista: estatusKey,
+        respuesta_transportista: def.requiereFoto ? "ADJUNTA_SUSTENTO" : "SIN_SUSTENTO",
+        motivo_transportista: transitoMotivo.trim() || null,
         fecha_respuesta_transportista: ahora,
         subido_por: email,
         sustento_individual: transitoSoloEsteBulto,
@@ -982,6 +1046,10 @@ export default function App() {
         motivo_desaprobacion: null,
         foto_url_1: null,
         foto_url_2: null,
+        estado_procesamiento_ia: null,
+        estado_validacion_ia: null,
+        texto_detectado_ia: null,
+        match_ia: null,
       };
 
       // El path incluye la carga siempre -- y además el LPN puntual solo si
@@ -992,7 +1060,7 @@ export default function App() {
         : `transitos/${registro.proveedor}/${registro.nro_carga_final}`;
 
       const paths = [];
-      if (opcion === "ADJUNTA_SUSTENTO") {
+      if (def.requiereFoto) {
         for (let idx = 0; idx < Math.min(transitoArchivos.length, 2); idx++) {
           const comprimido = await comprimirImagen(transitoArchivos[idx]);
           const ext = comprimido.name.split(".").pop();
@@ -1004,12 +1072,14 @@ export default function App() {
         paths.forEach((path, i) => { base[`foto_url_${i + 1}`] = path; });
       }
 
-      // El historial de fotos es por bulto: cada bulto conserva el suyo. Se
-      // agrupan los bultos con el mismo historial para hacer un solo UPDATE
-      // por grupo (en la práctica casi siempre es 1 grupo = 1 UPDATE).
+      // El historial de fotos y el contador de intentos son por bulto: cada
+      // bulto conserva los suyos. Se agrupan los bultos con el mismo historial
+      // e intentos para hacer un solo UPDATE por grupo (casi siempre 1).
       const grupos = new Map();
       for (const t of objetivos) {
-        const clave = paths.length ? JSON.stringify([t.foto_versiones_1 || [], t.foto_versiones_2 || []]) : "_";
+        const clave = paths.length
+          ? JSON.stringify([t.foto_versiones_1 || [], t.foto_versiones_2 || [], t.intentos_ia || 0])
+          : "_";
         if (!grupos.has(clave)) grupos.set(clave, { muestra: t, lpns: [] });
         grupos.get(clave).lpns.push(t.nro_lpn_final);
       }
@@ -1017,19 +1087,56 @@ export default function App() {
       const payloadPorLpn = {};
       for (const { muestra, lpns } of grupos.values()) {
         const payload = { ...base };
-        paths.forEach((path, i) => {
-          const prev = muestra[`foto_versiones_${i + 1}`] || [];
-          payload[`foto_versiones_${i + 1}`] = [...prev, { v: prev.length + 1, path, subido_por: email, subido_en: ahora }];
-        });
+        if (paths.length) {
+          paths.forEach((path, i) => {
+            const prev = muestra[`foto_versiones_${i + 1}`] || [];
+            payload[`foto_versiones_${i + 1}`] = [...prev, { v: prev.length + 1, path, subido_por: email, subido_en: ahora }];
+          });
+          // Igual que PharmaSPOT: el intento se cuenta en el mismo UPDATE que
+          // guarda la foto, no en un paso aparte.
+          payload.intentos_ia = (muestra.intentos_ia || 0) + 1;
+        }
         const { error } = await supabase.from("registros_transito").update(payload).in("nro_lpn_final", lpns);
         if (error) throw error;
         lpns.forEach(l => { payloadPorLpn[l] = payload; });
       }
 
-      setTransitos(prev => prev.map(t => (payloadPorLpn[t.nro_lpn_final] ? { ...t, ...payloadPorLpn[t.nro_lpn_final] } : t)));
-      setTransitoSustentoModal(null);
+      const aplicar = (cambiosPorLpn) => {
+        setTransitos(prev => prev.map(t => (cambiosPorLpn[t.nro_lpn_final] ? { ...t, ...cambiosPorLpn[t.nro_lpn_final] } : t)));
+        setTransitoSustentoModal(prev => (prev && cambiosPorLpn[prev.nro_lpn_final] ? { ...prev, ...cambiosPorLpn[prev.nro_lpn_final] } : prev));
+      };
+      aplicar(payloadPorLpn);
+
+      if (!paths.length) {
+        // Sin foto (pendiente de entrega / siniestro): no hay nada que leer.
+        setTransitoSustentoModal(null);
+        return;
+      }
+
+      // Con foto: lectura automática. El modal se queda abierto mostrando
+      // "Validando..." y luego el resultado.
+      const lpnsFoto = Object.keys(payloadPorLpn);
+      setTransitoResultadoIA({ validando: true, lpnsFoto });
+      const resultados = await validarSustentoConIA(lpnsFoto);
+      if (resultados) {
+        const cambiosIA = {};
+        resultados.forEach(r => { if (r?.nro_lpn_final && r.cambios) cambiosIA[r.nro_lpn_final] = r.cambios; });
+        aplicar(cambiosIA);
+      }
+      setTransitoResultadoIA({ validando: false, lpnsFoto, resultados });
+
+      // Si la IA aprobó todos, cierra solo tras 2.2s (como PharmaSPOT). Si no,
+      // se queda abierto para que el transportista vea qué faltó.
+      const todosAprobados = resultados && lpnsFoto.every(l => resultados.find(r => r.nro_lpn_final === l)?.aprobado);
+      if (todosAprobados) {
+        setTimeout(() => {
+          setTransitoSustentoModal(null);
+          setTransitoResultadoIA(null);
+        }, 2200);
+      }
     } catch (err) {
       setTransitoErr(err.message || "Error al guardar.");
+      setTransitoResultadoIA(null);
     } finally {
       setTransitoSaving(false);
     }
@@ -1042,6 +1149,13 @@ export default function App() {
     setTransitoMotivo("");
     setTransitoArchivos([]);
     setTransitoErr("");
+    setTransitoResultadoIA(null);
+  }
+
+  function cerrarSustentoTransito() {
+    if (transitoSaving) return;
+    setTransitoSustentoModal(null);
+    setTransitoResultadoIA(null);
   }
 
   function abrirRevisionTransito(r) {
@@ -1049,20 +1163,38 @@ export default function App() {
     setTransitoMotivoDesaprobacion("");
   }
 
-  // Bloque reutilizable: muestra lo que el transportista respondió (motivo o
-  // fotos) y, si ya hubo veredicto, el resultado. Lo usan los 2 modales.
+  // Texto corto del resultado de la IA para un bulto, o null si no aplica.
+  function notaIATransito(r) {
+    if (r.estado_validacion_admin === "APROBADO" && r.validado_por === "IA") return "Aprobado por IA";
+    if (estadoTransito(r) !== "POR_VALIDAR" || r.respuesta_transportista !== "ADJUNTA_SUSTENTO") return null;
+    const intentos = r.intentos_ia || 0;
+    if (transitoBloqueadoIA(r)) return "Máx. de intentos: revisa el admin";
+    if (r.estado_procesamiento_ia === "ERROR" || r.estado_validacion_ia === "NO_COINCIDE") return `Intento ${intentos} de ${MAX_INTENTOS_IA_TRANSITO}`;
+    if (!r.estado_procesamiento_ia && intentos > 0) return "Lectura automática pendiente";
+    return null;
+  }
+
+  // Bloque reutilizable: muestra lo que el transportista respondió (estatus,
+  // observación y fotos), la lectura de la IA y, si ya hubo veredicto, el
+  // resultado. Lo usan los 2 modales.
   function renderSustentoTransito(r, { mostrarVeredicto = true } = {}) {
     const fotos = [r.foto_url_1, r.foto_url_2].filter(Boolean);
+    const def = ESTATUS_TRANSITO_POR_KEY[r.estatus_transportista];
+    const titulo = def ? def.label
+      : r.respuesta_transportista === "ADJUNTA_SUSTENTO" ? "Adjuntó sustento" : "Sin sustento";
+    const intentos = r.intentos_ia || 0;
     return (
       <div>
         <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>
-            {r.respuesta_transportista === "ADJUNTA_SUSTENTO" ? "Adjuntó sustento" : "Sin sustento"}
-            {r.fecha_respuesta_transportista ? ` el ${fmtFechaHora(r.fecha_respuesta_transportista)}` : ""}
-            {r.subido_por ? ` por ${r.subido_por}` : ""}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: def ? def.bg : GRAY_100, color: def ? def.fg : GRAY_900 }}>{titulo.toUpperCase()}</span>
+            <span style={{ fontSize: 11, color: GRAY_500 }}>
+              {r.fecha_respuesta_transportista ? fmtFechaHora(r.fecha_respuesta_transportista) : ""}
+              {r.subido_por ? `, ${r.subido_por}` : ""}
+            </span>
           </div>
-          {r.respuesta_transportista === "SIN_SUSTENTO" && (
-            <div style={{ fontSize: 12, color: GRAY_900, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{r.motivo_transportista || "—"}</div>
+          {r.motivo_transportista && (
+            <div style={{ fontSize: 12, color: GRAY_900, whiteSpace: "pre-wrap", lineHeight: 1.5, marginBottom: fotos.length ? 8 : 0 }}>{r.motivo_transportista}</div>
           )}
           {r.respuesta_transportista === "ADJUNTA_SUSTENTO" && (
             fotos.length === 0 ? (
@@ -1081,6 +1213,23 @@ export default function App() {
             )
           )}
         </div>
+
+        {r.respuesta_transportista === "ADJUNTA_SUSTENTO" && r.estado_procesamiento_ia && !(r.validado_por === "IA") && (
+          <div style={{ marginTop: 8, padding: "8px 12px", background: BLUE_LIGHT, borderRadius: 8, fontSize: 12, color: BLUE, lineHeight: 1.5 }}>
+            {r.estado_procesamiento_ia === "ERROR" ? (
+              <>La lectura automática falló en el intento {intentos} de {MAX_INTENTOS_IA_TRANSITO}.</>
+            ) : r.estado_validacion_ia === "COINCIDE" ? (
+              <><b>COINCIDE</b>: la IA encontró el LPN en la foto ({r.match_ia ?? 0}% de coincidencia).</>
+            ) : (
+              <>
+                <b>NO COINCIDE</b>: la IA no encontró el LPN <span style={{ fontFamily: "monospace" }}>{r.nro_lpn_final}</span> en la foto
+                {r.texto_detectado_ia ? <>; lo más parecido que leyó fue <span style={{ fontFamily: "monospace" }}>{r.texto_detectado_ia}</span> ({r.match_ia ?? 0}%)</> : ""}.
+                {" "}Intento {intentos} de {MAX_INTENTOS_IA_TRANSITO}.
+              </>
+            )}
+          </div>
+        )}
+
         {mostrarVeredicto && r.estado_validacion_admin === "DESAPROBADO" && (
           <div style={{ marginTop: 8, padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 12, color: RED_DARK, lineHeight: 1.5 }}>
             <div style={{ fontWeight: 600, marginBottom: 2 }}>Desaprobado{r.fecha_validacion ? ` el ${fmtFechaHora(r.fecha_validacion)}` : ""}</div>
@@ -1089,7 +1238,9 @@ export default function App() {
         )}
         {mostrarVeredicto && r.estado_validacion_admin === "APROBADO" && (
           <div style={{ marginTop: 8, padding: "8px 12px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN, fontWeight: 600 }}>
-            Aprobado{r.fecha_validacion ? ` el ${fmtFechaHora(r.fecha_validacion)}` : ""}{r.validado_por ? ` por ${r.validado_por}` : ""}
+            {r.validado_por === "IA"
+              ? `COINCIDE: aprobado automáticamente, la IA encontró el LPN en la foto${r.match_ia != null ? ` (${r.match_ia}%)` : ""}.`
+              : `Aprobado${r.fecha_validacion ? ` el ${fmtFechaHora(r.fecha_validacion)}` : ""}${r.validado_por ? ` por ${r.validado_por}` : ""}`}
           </div>
         )}
       </div>
@@ -2672,16 +2823,24 @@ export default function App() {
                         let content;
                         if (c.key === "respuesta_transportista") {
                           const val = r.respuesta_transportista;
-                          const b = val === "ADJUNTA_SUSTENTO" ? badge(GREEN_LIGHT, GREEN, "CON SUSTENTO")
+                          const def = ESTATUS_TRANSITO_POR_KEY[r.estatus_transportista];
+                          // Registros anteriores a los estatus muestran la respuesta antigua.
+                          const b = def ? badge(def.bg, def.fg, def.label.toUpperCase())
+                            : val === "ADJUNTA_SUSTENTO" ? badge(GREEN_LIGHT, GREEN, "CON SUSTENTO")
                             : val === "SIN_SUSTENTO" ? badge(AMBER_LIGHT, AMBER, "SIN SUSTENTO")
                             : badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
                           content = val && r.sustento_individual ? (
                             <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>Solo este bulto</div></div>
                           ) : b;
                         } else if (c.key === "estado_validacion_admin") {
-                          if (estado === "SIN_RESPUESTA") content = <span style={{ color: GRAY_200 }}>—</span>;
-                          else if (estado === "POR_VALIDAR") content = badge(AMBER_LIGHT, AMBER, "POR VALIDAR");
-                          else if (estado === "APROBADO") content = badge(GREEN_LIGHT, GREEN, "APROBADO");
+                          const nota = notaIATransito(r);
+                          const conNota = (b) => nota ? (
+                            <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>{nota}</div></div>
+                          ) : b;
+                          if (estado === "SIN_RESPUESTA" || estado === "PENDIENTE_ENTREGA") content = <span style={{ color: GRAY_200 }}>—</span>;
+                          else if (estado === "POR_VALIDAR") content = conNota(badge(AMBER_LIGHT, AMBER, "POR VALIDAR"));
+                          else if (estado === "APROBADO") content = conNota(badge(GREEN_LIGHT, GREEN, "APROBADO"));
+                          else if (estado === "NO_SUSTENTADO") content = badge(GRAY_100, GRAY_900, "NO SUSTENTADO");
                           else content = (
                             <div>
                               {badge(RED_LIGHT, RED_DARK, "DESAPROBADO")}
@@ -2690,6 +2849,17 @@ export default function App() {
                               )}
                             </div>
                           );
+                        } else if (c.key === "estado_validacion_ia") {
+                          // Mismo vocabulario que PharmaSPOT: COINCIDE / NO_COINCIDE,
+                          // más ERROR y PROCESANDO para la lectura en curso o fallida.
+                          const conFoto = r.respuesta_transportista === "ADJUNTA_SUSTENTO";
+                          const ev = r.estado_validacion_ia;
+                          const pct = r.match_ia != null ? <div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>Match {r.match_ia}%</div> : null;
+                          if (ev === "COINCIDE") content = <div>{badge(GREEN_LIGHT, GREEN, "COINCIDE")}{pct}</div>;
+                          else if (ev === "NO_COINCIDE") content = <div>{badge(RED_LIGHT, RED_DARK, "NO COINCIDE")}{pct}</div>;
+                          else if (conFoto && r.estado_procesamiento_ia === "ERROR") content = badge(AMBER_LIGHT, AMBER, "ERROR");
+                          else if (conFoto && !r.estado_procesamiento_ia && (r.intentos_ia || 0) > 0 && estado === "POR_VALIDAR") content = badge(BLUE_LIGHT, BLUE, "PROCESANDO");
+                          else content = <span style={{ color: GRAY_200 }}>—</span>;
                         } else if (c.key === "costo_total") {
                           content = r.costo_total != null ? Number(r.costo_total).toFixed(2) : "—";
                         } else if (c.key === "fecha_limite_transp") {
@@ -2703,15 +2873,16 @@ export default function App() {
                         {!isAdmin && (
                           <button onClick={() => abrirSustentoTransito(r)} style={btnFila}>
                             {estado === "SIN_RESPUESTA" ? "Sustentar"
-                              : estado === "POR_VALIDAR" ? "Modificar"
+                              : estado === "APROBADO" || transitoBloqueadoIA(r) ? "Ver"
                               : estado === "DESAPROBADO" ? "Volver a sustentar"
-                              : "Ver"}
+                              : estado === "PENDIENTE_ENTREGA" ? "Actualizar"
+                              : "Modificar"}
                           </button>
                         )}
                         {isAdmin && estado === "POR_VALIDAR" && (
                           <button onClick={() => abrirRevisionTransito(r)} style={{ ...btnFila, border: `1px solid ${RED}`, color: RED_DARK, fontWeight: 600 }}>Revisar</button>
                         )}
-                        {isAdmin && (estado === "APROBADO" || estado === "DESAPROBADO") && (
+                        {isAdmin && estado !== "POR_VALIDAR" && estado !== "SIN_RESPUESTA" && (
                           <button onClick={() => abrirRevisionTransito(r)} style={btnFila}>Ver</button>
                         )}
                       </td>
@@ -2836,132 +3007,247 @@ export default function App() {
         const aprobadosEnCarga = bultosDeLaCarga.filter(t => t.estado_validacion_admin === "APROBADO").length;
         const individualesEnCarga = bultosDeLaCarga.filter(t =>
           t.sustento_individual && t.estado_validacion_admin !== "APROBADO" && t.nro_lpn_final !== reg.nro_lpn_final).length;
+        const bloqueadosEnCarga = bultosDeLaCarga.filter(t => transitoBloqueadoIA(t) && t.nro_lpn_final !== reg.nro_lpn_final).length;
         const plural = (n, uno, varios) => (n === 1 ? uno : varios);
-        const soloLectura = reg.estado_validacion_admin === "APROBADO";
+        const bloqueado = transitoBloqueadoIA(reg);
+        const soloLectura = reg.estado_validacion_admin === "APROBADO" || bloqueado;
         const nObjetivo = objetivosSustento(reg, transitoSoloEsteBulto).length;
+        const defElegido = ESTATUS_TRANSITO_POR_KEY[transitoOpcionElegida];
+        const res = transitoResultadoIA;
+        const filaActual = (lpn) => transitos.find(t => t.nro_lpn_final === lpn);
         const etiquetaEstado = (t) => {
           const e = estadoTransito(t);
-          return e === "APROBADO" ? { txt: "Aprobado", fg: GREEN }
+          return e === "APROBADO" ? { txt: t.validado_por === "IA" ? "Aprobado por IA" : "Aprobado", fg: GREEN }
             : e === "DESAPROBADO" ? { txt: "Desaprobado", fg: RED_DARK }
-            : e === "POR_VALIDAR" ? { txt: "Por validar", fg: AMBER }
+            : e === "POR_VALIDAR" ? { txt: transitoBloqueadoIA(t) ? "Lo revisa el admin" : "Por validar", fg: AMBER }
+            : e === "PENDIENTE_ENTREGA" ? { txt: "Pendiente de entrega", fg: AMBER }
+            : e === "NO_SUSTENTADO" ? { txt: "No sustentado", fg: GRAY_900 }
             : { txt: "Sin respuesta", fg: GRAY_500 };
         };
+        const btnSec = { flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" };
+        const btnPri = (activo, color) => ({ flex: 1, padding: "8px 0", background: activo ? color : GRAY_200, color: activo ? "white" : GRAY_500, border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: activo ? "pointer" : "default" });
+        const cajaErr = transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>;
+
+        // Vista de resultado de la IA (después de guardar con foto).
+        const renderResultadoIA = () => {
+          if (res.validando) {
+            return (
+              <div style={{ padding: "24px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: GRAY_900, marginBottom: 4 }}>Validando la foto...</div>
+                <div style={{ fontSize: 11, color: GRAY_500 }}>
+                  Buscando el N° de LPN de {res.lpnsFoto.length} {plural(res.lpnsFoto.length, "bulto", "bultos")} en la foto. Puede tardar unos segundos.
+                </div>
+              </div>
+            );
+          }
+          if (!res.resultados) {
+            return (
+              <>
+                <div style={{ padding: "10px 12px", background: AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: AMBER, lineHeight: 1.5, marginBottom: 14 }}>
+                  No se pudo completar la validación automática. Tus fotos quedaron guardadas y el administrador las revisará.
+                </div>
+                <div style={{ display: "flex" }}><button onClick={cerrarSustentoTransito} style={btnSec}>Cerrar</button></div>
+              </>
+            );
+          }
+          const aprobados = res.lpnsFoto.filter(l => res.resultados.find(r => r.nro_lpn_final === l)?.aprobado);
+          const pendientes = res.lpnsFoto.filter(l => !aprobados.includes(l));
+          const reintentables = pendientes.map(filaActual).filter(t => t && !transitoBloqueadoIA(t));
+          return (
+            <>
+              {aprobados.length > 0 && (
+                <div style={{ padding: "10px 12px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN, fontWeight: 600, marginBottom: 10 }}>
+                  {pendientes.length === 0
+                    ? `La IA encontró el LPN: ${aprobados.length} ${plural(aprobados.length, "bulto aprobado", "bultos aprobados")} automáticamente.`
+                    : `${aprobados.length} de ${res.lpnsFoto.length} bultos aprobados automáticamente.`}
+                </div>
+              )}
+              {pendientes.length > 0 && (
+                <div style={{ padding: "10px 12px", background: AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: AMBER, lineHeight: 1.5, marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    La IA no encontró el N° de LPN de {pendientes.length === 1 ? "este bulto" : `estos ${pendientes.length} bultos`}:
+                  </div>
+                  <div style={{ maxHeight: 120, overflowY: "auto" }}>
+                    {pendientes.map(l => {
+                      const t = filaActual(l);
+                      const intentos = t?.intentos_ia || 0;
+                      return (
+                        <div key={l} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ fontFamily: "monospace" }}>{l}</span>
+                          <span>{t && transitoBloqueadoIA(t) ? "Lo revisa el admin" : `Intento ${intentos} de ${MAX_INTENTOS_IA_TRANSITO}`}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 6 }}>
+                    {reintentables.length > 0
+                      ? "Quedan por validar. Puedes subir otra foto: con el número completo, enfocado y sin reflejos ni sombras."
+                      : "Se alcanzó el máximo de intentos. El administrador revisará estos bultos."}
+                  </div>
+                </div>
+              )}
+              {pendientes.length === 0 ? (
+                <div style={{ fontSize: 11, color: GRAY_500, textAlign: "center" }}>Cerrando...</div>
+              ) : (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={cerrarSustentoTransito} style={btnSec}>Cerrar</button>
+                  {reintentables.length > 0 && (
+                    <button onClick={() => {
+                      // Reintento sobre el mismo bulto si sigue pendiente; si no,
+                      // sobre el primer bulto que aún puede reintentar.
+                      const destino = reintentables.find(t => t.nro_lpn_final === reg.nro_lpn_final) || reintentables[0];
+                      setTransitoSustentoModal(destino);
+                      setTransitoResultadoIA(null);
+                      setTransitoArchivos([]);
+                      setTransitoErr("");
+                    }} style={btnPri(true, GREEN)}>Subir otra foto</button>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        };
+
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
-            onClick={e => e.target === e.currentTarget && !transitoSaving && setTransitoSustentoModal(null)}>
-            <div style={{ background: "white", borderRadius: 14, padding: 24, width: 460, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            onClick={e => e.target === e.currentTarget && cerrarSustentoTransito()}>
+            <div style={{ background: "white", borderRadius: 14, padding: 24, width: 480, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>{soloLectura ? "Sustento aprobado" : reg.respuesta_transportista ? "Actualizar sustento" : "Sustentar carga"}</div>
-                <button onClick={() => setTransitoSustentoModal(null)} disabled={transitoSaving} aria-label="Cerrar" style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>
+                  {res ? "Validación automática"
+                    : reg.estado_validacion_admin === "APROBADO" ? "Sustento aprobado"
+                    : bloqueado ? "En revisión del administrador"
+                    : reg.respuesta_transportista ? "Actualizar estatus"
+                    : "Registrar estatus"}
+                </div>
+                <button onClick={cerrarSustentoTransito} disabled={transitoSaving} aria-label="Cerrar" style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 14 }}>
                 Carga <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_carga_final}</span>
                 {", "}bulto <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_lpn_final}</span>
               </div>
 
-              {reg.respuesta_transportista && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>Sustento actual de este bulto</div>
-                  {renderSustentoTransito(reg)}
-                </div>
-              )}
-
-              {!soloLectura && (
+              {res ? renderResultadoIA() : (
                 <>
-                  <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8, marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>
-                      Bultos de esta carga ({bultosDeLaCarga.length})
-                    </div>
-                    <div style={{ fontSize: 11, lineHeight: 1.7, maxHeight: 120, overflowY: "auto" }}>
-                      {bultosDeLaCarga.map(b => {
-                        const esEste = b.nro_lpn_final === reg.nro_lpn_final;
-                        const et = etiquetaEstado(b);
-                        return (
-                          <div key={b.nro_lpn_final} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                            <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: esEste ? 700 : 400 }}>{b.nro_lpn_final}{esEste ? " (este)" : ""}</span>
-                            <span style={{ color: et.fg }}>{et.txt}{b.sustento_individual ? ", individual" : ""}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
-                    <input type="checkbox" checked={transitoSoloEsteBulto} onChange={e => { setTransitoSoloEsteBulto(e.target.checked); setTransitoErr(""); }} style={{ marginTop: 2 }} />
-                    <span>Aplicar solo a este bulto ({reg.nro_lpn_final}), para un sustento parcial</span>
-                  </label>
-                  <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 16, paddingLeft: 21 }}>
-                    {transitoSoloEsteBulto
-                      ? "La respuesta se guardará solo en este bulto."
-                      : [
-                          `La respuesta se guardará en ${nObjetivo} ${plural(nObjetivo, "bulto", "bultos")} de la carga.`,
-                          aprobadosEnCarga > 0 ? `${aprobadosEnCarga} ${plural(aprobadosEnCarga, "ya aprobado no se modifica", "ya aprobados no se modifican")}.` : "",
-                          individualesEnCarga > 0 ? `${individualesEnCarga} con sustento individual ${plural(individualesEnCarga, "se mantiene", "se mantienen")}.` : "",
-                        ].filter(Boolean).join(" ")}
-                    {reg.respuesta_transportista ? " Reemplaza la respuesta anterior y vuelve a quedar por validar." : ""}
-                  </div>
-
-                  {!transitoOpcionElegida ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <button onClick={() => setTransitoOpcionElegida("ADJUNTA_SUSTENTO")} disabled={nObjetivo === 0}
-                        style={{ padding: "10px 0", background: nObjetivo === 0 ? GRAY_200 : GREEN, color: nObjetivo === 0 ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: nObjetivo === 0 ? "default" : "pointer" }}>
-                        Adjuntar sustento
-                      </button>
-                      <button onClick={() => setTransitoOpcionElegida("SIN_SUSTENTO")} disabled={nObjetivo === 0}
-                        style={{ padding: "10px 0", background: "white", color: nObjetivo === 0 ? GRAY_500 : GRAY_900, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: nObjetivo === 0 ? "default" : "pointer" }}>
-                        No cuenta con sustento
-                      </button>
-                    </div>
-                  ) : transitoOpcionElegida === "ADJUNTA_SUSTENTO" ? (
-                    <div>
-                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Adjunta hasta 2 fotos:</div>
-                      <input type="file" accept="image/*" multiple
-                        onChange={e => { setTransitoArchivos(Array.from(e.target.files).slice(0, 2)); setTransitoErr(""); }}
-                        style={{ fontSize: 12, marginBottom: 10 }} />
-                      {transitoArchivos.length > 0 && (
-                        <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 10 }}>
-                          {transitoArchivos.map((f, i) => <div key={i}>📎 {f.name}</div>)}
-                        </div>
-                      )}
-                      {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => { setTransitoOpcionElegida(null); setTransitoArchivos([]); setTransitoErr(""); }} disabled={transitoSaving}
-                          style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
-                          Atrás
-                        </button>
-                        <button onClick={() => handleGuardarSustento("ADJUNTA_SUSTENTO")} disabled={transitoSaving}
-                          style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : GREEN, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
-                          {transitoSaving ? "Guardando..." : "Guardar sustento"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Explica por qué no cuenta con sustento:</div>
-                      <textarea value={transitoMotivo} onChange={e => { setTransitoMotivo(e.target.value); setTransitoErr(""); }} rows={3}
-                        style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }} />
-                      {transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {transitoErr}</div>}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => { setTransitoOpcionElegida(null); setTransitoErr(""); }} disabled={transitoSaving}
-                          style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>
-                          Atrás
-                        </button>
-                        <button onClick={() => handleGuardarSustento("SIN_SUSTENTO")} disabled={transitoSaving}
-                          style={{ flex: 1, padding: "8px 0", background: transitoSaving ? GRAY_200 : RED, color: transitoSaving ? GRAY_500 : "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: transitoSaving ? "default" : "pointer" }}>
-                          {transitoSaving ? "Guardando..." : "Guardar respuesta"}
-                        </button>
-                      </div>
+                  {reg.respuesta_transportista && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>Estatus actual de este bulto</div>
+                      {renderSustentoTransito(reg)}
                     </div>
                   )}
-                  {!transitoOpcionElegida && transitoErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginTop: 10 }}>⚠ {transitoErr}</div>}
-                </>
-              )}
 
-              {soloLectura && (
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button onClick={() => setTransitoSustentoModal(null)}
-                    style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cerrar</button>
-                </div>
+                  {bloqueado && (
+                    <div style={{ padding: "10px 12px", background: AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: AMBER, lineHeight: 1.5, marginBottom: 14 }}>
+                      Se alcanzó el máximo de {MAX_INTENTOS_IA_TRANSITO} intentos. El administrador revisará este bulto.
+                    </div>
+                  )}
+
+                  {!soloLectura && (
+                    <>
+                      <div style={{ padding: "10px 12px", background: GRAY_50, borderRadius: 8, marginBottom: 12 }}>
+                        <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>
+                          Bultos de esta carga ({bultosDeLaCarga.length})
+                        </div>
+                        <div style={{ fontSize: 11, lineHeight: 1.7, maxHeight: 120, overflowY: "auto" }}>
+                          {bultosDeLaCarga.map(b => {
+                            const esEste = b.nro_lpn_final === reg.nro_lpn_final;
+                            const et = etiquetaEstado(b);
+                            return (
+                              <div key={b.nro_lpn_final} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                                <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: esEste ? 700 : 400 }}>{b.nro_lpn_final}{esEste ? " (este)" : ""}</span>
+                                <span style={{ color: et.fg }}>{et.txt}{b.sustento_individual ? ", individual" : ""}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
+                        <input type="checkbox" checked={transitoSoloEsteBulto} onChange={e => { setTransitoSoloEsteBulto(e.target.checked); setTransitoErr(""); }} style={{ marginTop: 2 }} />
+                        <span>Aplicar solo a este bulto ({reg.nro_lpn_final}), para un sustento parcial</span>
+                      </label>
+                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 16, paddingLeft: 21 }}>
+                        {transitoSoloEsteBulto
+                          ? "El estatus se guardará solo en este bulto."
+                          : [
+                              `El estatus se guardará en ${nObjetivo} ${plural(nObjetivo, "bulto", "bultos")} de la carga.`,
+                              aprobadosEnCarga > 0 ? `${aprobadosEnCarga} ${plural(aprobadosEnCarga, "ya aprobado no se modifica", "ya aprobados no se modifican")}.` : "",
+                              individualesEnCarga > 0 ? `${individualesEnCarga} con sustento individual ${plural(individualesEnCarga, "se mantiene", "se mantienen")}.` : "",
+                              bloqueadosEnCarga > 0 ? `${bloqueadosEnCarga} en revisión del administrador no ${plural(bloqueadosEnCarga, "se modifica", "se modifican")}.` : "",
+                            ].filter(Boolean).join(" ")}
+                        {reg.respuesta_transportista ? " Reemplaza el estatus anterior." : ""}
+                      </div>
+
+                      {!defElegido ? (
+                        <div>
+                          <div style={{ fontSize: 11, color: GRAY_500, fontWeight: 500, marginBottom: 6 }}>Elige el estatus</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {ESTATUS_TRANSITO.map(e => (
+                              <button key={e.key} disabled={nObjetivo === 0}
+                                onClick={() => { setTransitoOpcionElegida(e.key); setTransitoArchivos([]); setTransitoErr(""); }}
+                                style={{ textAlign: "left", padding: "9px 12px", background: "white", border: `1px solid ${BORDER}`, borderLeft: `3px solid ${e.fg}`, borderRadius: 8, cursor: nObjetivo === 0 ? "default" : "pointer", opacity: nObjetivo === 0 ? 0.5 : 1 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_900 }}>
+                                  {e.label}
+                                  <span style={{ fontWeight: 400, color: GRAY_500 }}>{e.requiereFoto ? ", con foto" : ", sin foto"}</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: GRAY_500, marginTop: 2 }}>{e.ayuda}</div>
+                              </button>
+                            ))}
+                          </div>
+                          {transitoErr && <div style={{ marginTop: 10 }}>{cajaErr}</div>}
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderLeft: `3px solid ${defElegido.fg}`, background: defElegido.bg, borderRadius: 8, marginBottom: 12 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: defElegido.fg }}>{defElegido.label}</span>
+                            <button onClick={() => { setTransitoOpcionElegida(null); setTransitoArchivos([]); setTransitoErr(""); }} disabled={transitoSaving}
+                              style={{ background: "none", border: "none", padding: 0, fontSize: 11, color: defElegido.fg, textDecoration: "underline", cursor: "pointer" }}>Cambiar</button>
+                          </div>
+
+                          {defElegido.requiereFoto && (
+                            <>
+                              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, lineHeight: 1.5 }}>
+                                Adjunta hasta 2 fotos donde se vea el N° de LPN completo, enfocado y sin reflejos. La foto se valida automáticamente.
+                                {transitoSoloEsteBulto && (reg.intentos_ia || 0) > 0
+                                  ? ` Te ${plural(MAX_INTENTOS_IA_TRANSITO - (reg.intentos_ia || 0), "queda", "quedan")} ${MAX_INTENTOS_IA_TRANSITO - (reg.intentos_ia || 0)} de ${MAX_INTENTOS_IA_TRANSITO} intentos.`
+                                  : ""}
+                              </div>
+                              <input type="file" accept="image/*" multiple
+                                onChange={e => { setTransitoArchivos(Array.from(e.target.files).slice(0, 2)); setTransitoErr(""); }}
+                                style={{ fontSize: 12, marginBottom: 10 }} />
+                              {transitoArchivos.length > 0 && (
+                                <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 10 }}>
+                                  {transitoArchivos.map((f, i) => <div key={i}>📎 {f.name}</div>)}
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Observación (opcional):</div>
+                          <textarea value={transitoMotivo} onChange={e => { setTransitoMotivo(e.target.value); setTransitoErr(""); }} rows={2}
+                            style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, marginBottom: 10, fontFamily: "inherit", resize: "vertical" }} />
+
+                          {cajaErr}
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={() => { setTransitoOpcionElegida(null); setTransitoArchivos([]); setTransitoErr(""); }} disabled={transitoSaving} style={btnSec}>
+                              Atrás
+                            </button>
+                            <button onClick={() => handleGuardarSustento(defElegido.key)} disabled={transitoSaving} style={btnPri(!transitoSaving, GREEN)}>
+                              {transitoSaving ? "Guardando..." : defElegido.requiereFoto ? "Guardar y validar" : "Guardar estatus"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {soloLectura && (
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <button onClick={cerrarSustentoTransito}
+                        style={{ padding: "7px 20px", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500 }}>Cerrar</button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
