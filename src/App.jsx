@@ -65,6 +65,7 @@ const COLS_TRANSITOS = [
   { key: "tipo_mercaderia",     label: "Tipo Mercadería", width: 110 },
   { key: "costo_total",         label: "Costo",      width: 90 },
   { key: "fecha_limite_transp", label: "Fecha Límite", width: 110 },
+  { key: "fecha_reprogramada",  label: "Fecha reprogramada", width: 130 },
   { key: "respuesta_transportista", label: "Estatus",    width: 140 },
   { key: "estado_validacion_ia",    label: "Validación IA", width: 120 },
   { key: "estado_validacion_admin", label: "Validación", width: 120 },
@@ -83,6 +84,7 @@ const COLS_TRANSITOS_TRANSPORTISTA = [
   { key: "costo_total",              label: "Costo",      width: 90 },
   { key: "semana_llegada_estimada",  label: "Semana",     width: 70 },
   { key: "fecha_limite_transp",      label: "Fecha Límite", width: 110 },
+  { key: "fecha_reprogramada",       label: "Fecha reprogramada", width: 130 },
   { key: "respuesta_transportista",  label: "Estatus",    width: 140 },
   { key: "estado_validacion_ia",     label: "Validación IA", width: 120 },
   { key: "estado_validacion_admin",  label: "Validación", width: 120 },
@@ -133,6 +135,34 @@ function transitoBloqueadoIA(r) {
     && r.estado_validacion_ia !== "COINCIDE";
 }
 
+// --- Reprogramación de la fecha límite ---
+// El transportista puede proponer una nueva fecha cuando no llega a cumplir la
+// fecha límite. El botón aparece desde 1 día antes de la fecha vigente (y se
+// mantiene después de vencida). La fecha vigente es la reprogramada si existe;
+// si no, la original. La nueva fecha siempre debe ser posterior a la vigente.
+const ESTADOS_REPROGRAMABLES = ["SIN_RESPUESTA", "PENDIENTE_ENTREGA", "DESAPROBADO"];
+
+const pad2 = n => String(n).padStart(2, "0");
+// Fechas como texto "AAAA-MM-DD" en hora local (Perú), sin pasar por UTC.
+function hoyISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function sumarDiasISO(iso, dias) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const f = new Date(y, m - 1, d + dias);
+  return `${f.getFullYear()}-${pad2(f.getMonth() + 1)}-${pad2(f.getDate())}`;
+}
+function fechaLimiteVigente(r) {
+  return String(r.fecha_reprogramada || r.fecha_limite_transp || "").slice(0, 10) || null;
+}
+function puedeReprogramar(r) {
+  const vigente = fechaLimiteVigente(r);
+  if (!vigente) return false;
+  if (!ESTADOS_REPROGRAMABLES.includes(estadoTransito(r))) return false;
+  return hoyISO() >= sumarDiasISO(vigente, -1);
+}
+
 // Filtros del panel de Tránsitos. Todos se aplican en el navegador sobre los
 // bultos ya cargados (no hacen otra consulta a Supabase).
 const FILTROS_TRANSITO_VACIOS = {
@@ -147,13 +177,10 @@ const OPCIONES_VALIDACION_TRANSITO = [
   { key: "NO_SUSTENTADO", label: "No sustentado" },
 ];
 
-// Estatus "real" para el filtro: el de la lista nueva, el de los registros
-// anteriores a los estatus (con / sin sustento) o SIN_RESPUESTA.
+// Estatus para la columna y el filtro: uno de ESTATUS_TRANSITO o
+// SIN_RESPUESTA. Los antiguos "con sustento" / "sin sustento" ya no se usan.
 function estatusFiltroTransito(r) {
-  if (r.estatus_transportista) return r.estatus_transportista;
-  if (r.respuesta_transportista === "ADJUNTA_SUSTENTO") return "LEGADO_CON";
-  if (r.respuesta_transportista === "SIN_SUSTENTO") return "LEGADO_SIN";
-  return "SIN_RESPUESTA";
+  return ESTATUS_TRANSITO_POR_KEY[r.estatus_transportista] ? r.estatus_transportista : "SIN_RESPUESTA";
 }
 
 function filtrarTransitos(lista, f, isAdmin) {
@@ -413,6 +440,58 @@ function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
   );
 }
 
+// Calendario de un solo día, con el mismo diseño que RangePicker. Los días
+// anteriores a "min" se ven apagados y no se pueden elegir.
+function DatePicker({ value, min, onChange }) {
+  const iso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const parse = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+  const hoy = hoyISO();
+  const [mesVista, setMesVista] = useState(() => { const ref = parse(value || min || hoy); return new Date(ref.getFullYear(), ref.getMonth(), 1); });
+  const dias = [];
+  for (let i = 0; i < mesVista.getDay(); i++) dias.push(null);
+  const total = new Date(mesVista.getFullYear(), mesVista.getMonth() + 1, 0).getDate();
+  for (let d = 1; d <= total; d++) dias.push(new Date(mesVista.getFullYear(), mesVista.getMonth(), d));
+  const fmtLocal = s => { const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : s; };
+  return (
+    <div style={{ userSelect: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <button onClick={() => setMesVista(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} aria-label="Mes anterior" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: GRAY_500, padding: "2px 6px" }}>‹</button>
+        <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, textTransform: "uppercase", letterSpacing: ".04em" }}>
+          {MESES_ES[mesVista.getMonth()]} {mesVista.getFullYear()}
+        </div>
+        <button onClick={() => setMesVista(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))} aria-label="Mes siguiente" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: GRAY_500, padding: "2px 6px" }}>›</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
+        {DIAS_ES.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, color: GRAY_500, fontWeight: 500, padding: "2px 0" }}>{d}</div>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px 0" }}>
+        {dias.map((dia, i) => {
+          if (!dia) return <div key={i} />;
+          const s = iso(dia);
+          const bloqueado = min && s < min;
+          const sel = s === value;
+          const esHoy = s === hoy;
+          return (
+            <div key={i} onClick={() => !bloqueado && onChange(s)}
+              title={bloqueado ? "Debe ser posterior a la fecha límite" : undefined}
+              style={{ height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: bloqueado ? "not-allowed" : "pointer",
+                background: sel ? RED : "transparent", borderRadius: "50%",
+                color: sel ? "white" : bloqueado ? "#ccc" : esHoy ? RED : GRAY_900,
+                fontWeight: sel || esHoy ? 600 : 400, fontSize: 12,
+                outline: esHoy && !sel ? `1.5px solid ${RED}` : "none", outlineOffset: -2 }}>
+              {dia.getDate()}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 10, padding: "6px 10px", background: GRAY_100, borderRadius: 7, fontSize: 11, color: value ? GRAY_900 : GRAY_500, textAlign: "center", fontWeight: value ? 600 : 400 }}>
+        {value ? `Nueva fecha: ${fmtLocal(value)}` : "Selecciona la nueva fecha"}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session,      setSession]      = useState(null);
   const [loading,      setLoading]      = useState(true);
@@ -474,7 +553,14 @@ export default function App() {
   const [transitoFiltros, setTransitoFiltros] = useState(FILTROS_TRANSITO_VACIOS);
   const [transitoFiltrosDraft, setTransitoFiltrosDraft] = useState(FILTROS_TRANSITO_VACIOS);
   const [transitoFilterOpen, setTransitoFilterOpen] = useState(false);
-  const [transitoRangoKey, setTransitoRangoKey] = useState(0); // fuerza a reiniciar el calendario al limpiar
+  const [transitoRangoKey, setTransitoRangoKey] = useState(0);
+  // Reprogramación de fecha límite (transportista)
+  const [reprogModal, setReprogModal] = useState(null); // registro desde el que se abrió
+  const [reprogFecha, setReprogFecha] = useState("");
+  const [reprogMotivo, setReprogMotivo] = useState("");
+  const [reprogSolo, setReprogSolo] = useState(false);
+  const [reprogSaving, setReprogSaving] = useState(false);
+  const [reprogErr, setReprogErr] = useState(""); // fuerza a reiniciar el calendario al limpiar
   const [transitoMotivoDesaprobacion, setTransitoMotivoDesaprobacion] = useState("");
   const [transitoValidarSaving, setTransitoValidarSaving] = useState(false);
   const [dashProveedor, setDashProveedor] = useState("");
@@ -1217,6 +1303,67 @@ export default function App() {
     if (transitoSaving) return;
     setTransitoSustentoModal(null);
     setTransitoResultadoIA(null);
+  }
+
+  // Bultos a los que se aplica la nueva fecha: el bulto puntual, o los de la
+  // carga que hoy pueden reprogramarse y cuya fecha vigente es anterior a la
+  // nueva (un bulto con una fecha vigente igual o posterior no se toca).
+  function objetivosReprog(reg, solo, nuevaFecha) {
+    if (solo) return [reg];
+    return transitos.filter(t =>
+      t.nro_carga_final === reg.nro_carga_final &&
+      puedeReprogramar(t) &&
+      (!nuevaFecha || nuevaFecha > fechaLimiteVigente(t))
+    );
+  }
+
+  function abrirReprogramacion(r) {
+    setReprogModal(r);
+    setReprogFecha("");
+    setReprogMotivo("");
+    setReprogSolo(false);
+    setReprogErr("");
+  }
+
+  async function guardarReprogramacion() {
+    const reg = reprogModal;
+    if (!reg) return;
+    const minimo = sumarDiasISO(fechaLimiteVigente(reg), 1);
+    if (!reprogFecha) { setReprogErr("Elige la nueva fecha en el calendario."); return; }
+    if (reprogFecha < minimo) { setReprogErr("La nueva fecha debe ser posterior a la fecha límite vigente."); return; }
+    const objetivos = objetivosReprog(reg, reprogSolo, reprogFecha);
+    if (objetivos.length === 0) { setReprogErr("Ningún bulto de la carga puede reprogramarse a esa fecha."); return; }
+    setReprogSaving(true);
+    setReprogErr("");
+    try {
+      const ahora = new Date().toISOString();
+      const base = {
+        fecha_reprogramada: reprogFecha,
+        motivo_reprogramacion: reprogMotivo.trim() || null,
+        reprogramado_por: session.user.email,
+        fecha_registro_reprogramacion: ahora,
+      };
+      // El contador es por bulto: un UPDATE por cada valor distinto (casi siempre 1).
+      const grupos = new Map();
+      for (const t of objetivos) {
+        const v = t.veces_reprogramado || 0;
+        if (!grupos.has(v)) grupos.set(v, []);
+        grupos.get(v).push(t.nro_lpn_final);
+      }
+      const cambiosPorLpn = {};
+      for (const [veces, lpns] of grupos) {
+        const payload = { ...base, veces_reprogramado: veces + 1 };
+        const { error } = await supabase.from("registros_transito").update(payload).in("nro_lpn_final", lpns);
+        if (error) throw error;
+        lpns.forEach(l => { cambiosPorLpn[l] = payload; });
+      }
+      setTransitos(prev => prev.map(t => (cambiosPorLpn[t.nro_lpn_final] ? { ...t, ...cambiosPorLpn[t.nro_lpn_final] } : t)));
+      setReprogModal(null);
+    } catch (err) {
+      setReprogErr(err.message || "Error al guardar.");
+    } finally {
+      setReprogSaving(false);
+    }
   }
 
   function abrirFiltrosTransito() {
@@ -2095,8 +2242,6 @@ export default function App() {
         const tipos = unicos(r => r.tipo_mercaderia).sort((x, y) => String(x).localeCompare(String(y)));
         const semanas = unicos(r => r.semana_llegada_estimada).map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
         const proveedores = unicos(r => r.proveedor).sort();
-        const hayLegadoCon = transitos.some(r => estatusFiltroTransito(r) === "LEGADO_CON");
-        const hayLegadoSin = transitos.some(r => estatusFiltroTransito(r) === "LEGADO_SIN");
         const lbl = { fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 };
         const campo = { ...inp, width: "100%", boxSizing: "border-box" };
         return (
@@ -2145,8 +2290,6 @@ export default function App() {
                   <option value="">Todos</option>
                   <option value="SIN_RESPUESTA">Sin respuesta</option>
                   {ESTATUS_TRANSITO.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
-                  {hayLegadoCon && <option value="LEGADO_CON">Con sustento (anterior)</option>}
-                  {hayLegadoSin && <option value="LEGADO_SIN">Sin sustento (anterior)</option>}
                 </select>
               </div>
               <div>
@@ -2975,14 +3118,10 @@ export default function App() {
                       {colsTransitos.map(c => {
                         let content;
                         if (c.key === "respuesta_transportista") {
-                          const val = r.respuesta_transportista;
                           const def = ESTATUS_TRANSITO_POR_KEY[r.estatus_transportista];
-                          // Registros anteriores a los estatus muestran la respuesta antigua.
                           const b = def ? badge(def.bg, def.fg, def.label.toUpperCase())
-                            : val === "ADJUNTA_SUSTENTO" ? badge(GREEN_LIGHT, GREEN, "CON SUSTENTO")
-                            : val === "SIN_SUSTENTO" ? badge(AMBER_LIGHT, AMBER, "SIN SUSTENTO")
                             : badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
-                          content = val && r.sustento_individual ? (
+                          content = def && r.sustento_individual ? (
                             <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>Solo este bulto</div></div>
                           ) : b;
                         } else if (c.key === "estado_validacion_admin") {
@@ -3017,6 +3156,24 @@ export default function App() {
                           content = r.costo_total != null ? Number(r.costo_total).toFixed(2) : "—";
                         } else if (c.key === "semana_llegada_estimada") {
                           content = r.semana_llegada_estimada != null ? `SEM ${r.semana_llegada_estimada}` : "—";
+                        } else if (c.key === "fecha_reprogramada") {
+                          const veces = r.veces_reprogramado || 0;
+                          content = (
+                            <div>
+                              {r.fecha_reprogramada ? (
+                                <div title={r.motivo_reprogramacion ? `Motivo: ${r.motivo_reprogramacion}` : undefined}>
+                                  {fmtFechaSolo(r.fecha_reprogramada)}
+                                  {veces > 1 && <div style={{ fontSize: 10, color: GRAY_500, marginTop: 2 }}>Reprogramada {veces} veces</div>}
+                                </div>
+                              ) : !(!isAdmin && puedeReprogramar(r)) && <span style={{ color: GRAY_200 }}>—</span>}
+                              {!isAdmin && puedeReprogramar(r) && (
+                                <button onClick={() => abrirReprogramacion(r)} title="Proponer una nueva fecha límite"
+                                  style={{ marginTop: r.fecha_reprogramada ? 4 : 0, padding: "3px 9px", background: AMBER_LIGHT, border: `0.5px solid ${AMBER}`, borderRadius: 999, fontSize: 10, fontWeight: 600, color: AMBER, cursor: "pointer", whiteSpace: "nowrap" }}>
+                                  📅 Reprogramar
+                                </button>
+                              )}
+                            </div>
+                          );
                         } else if (c.key === "fecha_limite_transp") {
                           content = r.fecha_limite_transp ? fmtFechaSolo(r.fecha_limite_transp) : "—";
                         } else {
@@ -3155,6 +3312,63 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {reprogModal && (() => {
+        const reg = reprogModal;
+        const vigente = fechaLimiteVigente(reg);
+        const minimo = sumarDiasISO(vigente, 1);
+        const vencida = hoyISO() > vigente;
+        const nObj = objetivosReprog(reg, reprogSolo, reprogFecha || null).length;
+        const nCarga = transitos.filter(t => t.nro_carga_final === reg.nro_carga_final).length;
+        const cerrar = () => !reprogSaving && setReprogModal(null);
+        const listo = !!reprogFecha && !reprogSaving && nObj > 0;
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+            onClick={e => e.target === e.currentTarget && cerrar()}>
+            <div style={{ background: "white", borderRadius: 14, padding: 24, width: 380, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>Reprogramar fecha límite</div>
+                <button onClick={cerrar} disabled={reprogSaving} aria-label="Cerrar" style={{ width: 22, height: 22, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 12, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              </div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 12 }}>
+                Carga <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_carga_final}</span>
+                {", "}bulto <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_lpn_final}</span>
+              </div>
+
+              <div style={{ padding: "8px 12px", background: vencida ? RED_LIGHT : AMBER_LIGHT, borderRadius: 8, fontSize: 12, color: vencida ? RED_DARK : AMBER, marginBottom: 14 }}>
+                Fecha límite {reg.fecha_reprogramada ? "reprogramada" : "actual"}: <b>{fmtFechaSolo(vigente)}</b>{vencida ? " (vencida)" : ""}
+              </div>
+
+              <DatePicker value={reprogFecha} min={minimo} onChange={f => { setReprogFecha(f); setReprogErr(""); }} />
+
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "14px 0 4px", fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
+                <input type="checkbox" checked={reprogSolo} onChange={e => { setReprogSolo(e.target.checked); setReprogErr(""); }} style={{ marginTop: 2 }} />
+                <span>Aplicar solo a este bulto ({reg.nro_lpn_final})</span>
+              </label>
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 12, paddingLeft: 21 }}>
+                {reprogSolo
+                  ? "La nueva fecha se guardará solo en este bulto."
+                  : `La nueva fecha se guardará en ${nObj} de ${nCarga} ${nCarga === 1 ? "bulto" : "bultos"} de la carga.`}
+              </div>
+
+              <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6 }}>Motivo (opcional):</div>
+              <textarea value={reprogMotivo} onChange={e => setReprogMotivo(e.target.value)} rows={2}
+                placeholder="Ej.: paro de transportistas, bloqueo de vías"
+                style={{ width: "100%", boxSizing: "border-box", padding: "6px 10px", fontSize: 12, border: `0.5px solid ${BORDER}`, borderRadius: 8, marginBottom: 12, fontFamily: "inherit", resize: "vertical" }} />
+
+              {reprogErr && <div style={{ padding: "8px 12px", background: RED_LIGHT, borderRadius: 8, fontSize: 11, color: RED_DARK, marginBottom: 10 }}>⚠ {reprogErr}</div>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={cerrar} disabled={reprogSaving}
+                  style={{ flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" }}>Cancelar</button>
+                <button onClick={guardarReprogramacion} disabled={!listo}
+                  style={{ flex: 2, padding: "8px 0", background: listo ? RED : GRAY_200, color: listo ? "white" : GRAY_500, border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: listo ? "pointer" : "default" }}>
+                  {reprogSaving ? "Guardando..." : "Guardar nueva fecha"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {transitoSustentoModal && (() => {
         const reg = transitoSustentoModal;
@@ -3430,6 +3644,7 @@ export default function App() {
               <br />
               {reg.proveedor || "—"}{reg.nombre_instalacion_final ? `, ${reg.nombre_instalacion_final}` : ""}
               {reg.fecha_limite_transp ? `, fecha límite ${fmtFechaSolo(reg.fecha_limite_transp)}` : ""}
+              {reg.fecha_reprogramada ? `, reprogramada al ${fmtFechaSolo(reg.fecha_reprogramada)}` : ""}
             </div>
 
             <div style={{ marginBottom: 16 }}>{renderSustentoTransito(reg)}</div>
