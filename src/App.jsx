@@ -64,8 +64,8 @@ const COLS_TRANSITOS_TRANSPORTISTA = [
   { key: "nro_carga_final",          label: "N° Carga",   width: 130, mono: true },
   { key: "nro_lpn_final",            label: "N° LPN",     width: 150, mono: true },
   { key: "nombre_ruta_consolidada",  label: "Ruta",       width: 140 },
-  { key: "cod_sucursal_recibida",    label: "Cód. SAP",   width: 80,  mono: true },
-  { key: "nombre_sucursal_recibida", label: "Botica",     width: 170 },
+  { key: "cod_sucursal_planificada",    label: "Cód. SAP",   width: 80,  mono: true },
+  { key: "nombre_sucursal_planificada", label: "Botica",     width: 170 },
   { key: "tipo_mercaderia",          label: "Tipo Mercadería", width: 110 },
   { key: "costo_total",              label: "Costo",      width: 90 },
   { key: "semana_llegada_estimada",  label: "Semana",     width: 70 },
@@ -185,7 +185,7 @@ function filtrarTransitos(lista, f, isAdmin) {
       if (f.hasta && fecha > f.hasta) return false;
     }
     if (q) {
-      const campos = [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_recibida, r.nombre_sucursal_recibida, r.nombre_ruta_consolidada];
+      const campos = [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_planificada, r.nombre_sucursal_planificada, r.nombre_ruta_consolidada];
       if (isAdmin) campos.push(r.proveedor);
       if (!campos.some(v => String(v ?? "").toLowerCase().includes(q))) return false;
     }
@@ -3966,7 +3966,7 @@ export default function App() {
               {", "}carga <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_carga_final}</span>
               <br />
               {reg.proveedor || "—"}
-              {reg.nombre_sucursal_recibida ? `, botica ${reg.cod_sucursal_recibida ? `${reg.cod_sucursal_recibida} ` : ""}${reg.nombre_sucursal_recibida}` : ""}
+              {reg.nombre_sucursal_planificada ? `, botica ${reg.cod_sucursal_planificada ? `${reg.cod_sucursal_planificada} ` : ""}${reg.nombre_sucursal_planificada}` : ""}
               {reg.nombre_ruta_consolidada ? `, ruta ${reg.nombre_ruta_consolidada}` : ""}
               {reg.fecha_limite_transp ? `, fecha límite ${fmtFechaSolo(reg.fecha_limite_transp)}` : ""}
               {reg.fecha_reprogramada ? `, reprogramada al ${fmtFechaSolo(reg.fecha_reprogramada)}` : ""}
