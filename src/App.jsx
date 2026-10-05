@@ -56,24 +56,10 @@ const PILOTO_COTIZACION_PROVEEDOR = "RANSA";
 // null para habilitarlo a todos.
 const PILOTO_TRANSITOS_PROVEEDORES = ["RANSA"];
 
-// Columnas de registros_transito a mostrar en la tabla, en orden.
-const COLS_TRANSITOS = [
-  { key: "nro_carga_final",     label: "N° Carga",   width: 130, mono: true },
-  { key: "nro_lpn_final",       label: "N° LPN",     width: 150, mono: true },
-  { key: "nombre_instalacion_final", label: "Instalación", width: 150 },
-  { key: "nombre_ruta_consolidada",  label: "Ruta",   width: 140 },
-  { key: "tipo_mercaderia",     label: "Tipo Mercadería", width: 110 },
-  { key: "costo_total",         label: "Costo",      width: 90 },
-  { key: "fecha_limite_transp", label: "Fecha Límite", width: 110 },
-  { key: "fecha_reprogramada",  label: "Fecha reprogramada", width: 130 },
-  { key: "respuesta_transportista", label: "Estatus",    width: 140 },
-  { key: "estado_validacion_ia",    label: "Validación IA", width: 120 },
-  { key: "estado_validacion_admin", label: "Validación", width: 120 },
-];
 
-// Columnas de la vista del transportista: sin Instalación, con la botica de
+// Columnas de la tabla de Tránsitos: sin Instalación, con la botica de
 // destino (código SAP + nombre) después de la ruta y la semana antes de la
-// fecha límite. La vista del admin sigue usando COLS_TRANSITOS.
+// fecha límite. El admin ve las mismas, con la columna Transportista al inicio.
 const COLS_TRANSITOS_TRANSPORTISTA = [
   { key: "nro_carga_final",          label: "N° Carga",   width: 130, mono: true },
   { key: "nro_lpn_final",            label: "N° LPN",     width: 150, mono: true },
@@ -199,9 +185,8 @@ function filtrarTransitos(lista, f, isAdmin) {
       if (f.hasta && fecha > f.hasta) return false;
     }
     if (q) {
-      const campos = isAdmin
-        ? [r.nro_carga_final, r.nro_lpn_final, r.nombre_instalacion_final, r.nombre_ruta_consolidada, r.proveedor]
-        : [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_recibida, r.nombre_sucursal_recibida, r.nombre_ruta_consolidada];
+      const campos = [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_recibida, r.nombre_sucursal_recibida, r.nombre_ruta_consolidada];
+      if (isAdmin) campos.push(r.proveedor);
       if (!campos.some(v => String(v ?? "").toLowerCase().includes(q))) return false;
     }
     return true;
@@ -2258,7 +2243,7 @@ export default function App() {
               <div>
                 <div style={lbl}>Buscar</div>
                 <input value={d.busqueda} onChange={e => setD("busqueda", e.target.value)}
-                  placeholder={isAdmin ? "Carga, LPN, instalación, ruta o transportista" : "Carga, LPN, botica, código SAP o ruta"}
+                  placeholder={isAdmin ? "Carga, LPN, botica, código SAP, ruta o transportista" : "Carga, LPN, botica, código SAP o ruta"}
                   style={campo} />
               </div>
               {isAdmin && (
@@ -3075,7 +3060,7 @@ export default function App() {
 
       {vista === "transitos" && enPilotoTransitos && (() => {
         const colsTransitos = isAdmin
-          ? [{ key: "proveedor", label: "Transportista", width: 110 }, ...COLS_TRANSITOS]
+          ? [{ key: "proveedor", label: "Transportista", width: 110 }, ...COLS_TRANSITOS_TRANSPORTISTA]
           : COLS_TRANSITOS_TRANSPORTISTA;
         const transitosFiltrados = filtrarTransitos(transitos, transitoFiltros, isAdmin);
         const badge = (bg, fg, label) => (
@@ -3642,7 +3627,9 @@ export default function App() {
               Bulto <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_lpn_final}</span>
               {", "}carga <span style={{ fontFamily: "monospace", color: GRAY_900 }}>{reg.nro_carga_final}</span>
               <br />
-              {reg.proveedor || "—"}{reg.nombre_instalacion_final ? `, ${reg.nombre_instalacion_final}` : ""}
+              {reg.proveedor || "—"}
+              {reg.nombre_sucursal_recibida ? `, botica ${reg.cod_sucursal_recibida ? `${reg.cod_sucursal_recibida} ` : ""}${reg.nombre_sucursal_recibida}` : ""}
+              {reg.nombre_ruta_consolidada ? `, ruta ${reg.nombre_ruta_consolidada}` : ""}
               {reg.fecha_limite_transp ? `, fecha límite ${fmtFechaSolo(reg.fecha_limite_transp)}` : ""}
               {reg.fecha_reprogramada ? `, reprogramada al ${fmtFechaSolo(reg.fecha_reprogramada)}` : ""}
             </div>
