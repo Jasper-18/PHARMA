@@ -133,15 +133,54 @@ function transitoBloqueadoIA(r) {
     && r.estado_validacion_ia !== "COINCIDE";
 }
 
-const FILTROS_ESTADO_TRANSITO = [
-  { key: "TODOS",             label: "Todos" },
-  { key: "SIN_RESPUESTA",     label: "Sin respuesta" },
-  { key: "PENDIENTE_ENTREGA", label: "Pendiente de entrega" },
-  { key: "POR_VALIDAR",       label: "Por validar" },
-  { key: "APROBADO",          label: "Aprobados" },
-  { key: "DESAPROBADO",       label: "Desaprobados" },
-  { key: "NO_SUSTENTADO",     label: "No sustentados" },
+// Filtros del panel de Tránsitos. Todos se aplican en el navegador sobre los
+// bultos ya cargados (no hacen otra consulta a Supabase).
+const FILTROS_TRANSITO_VACIOS = {
+  busqueda: "", proveedor: "", ruta: "", tipo: "", estatus: "", validacion: "", semana: "", desde: "", hasta: "",
+};
+
+// Opciones del filtro "Validación": los mismos valores de la columna.
+const OPCIONES_VALIDACION_TRANSITO = [
+  { key: "POR_VALIDAR",   label: "Por validar" },
+  { key: "APROBADO",      label: "Aprobado" },
+  { key: "DESAPROBADO",   label: "Desaprobado" },
+  { key: "NO_SUSTENTADO", label: "No sustentado" },
 ];
+
+// Estatus "real" para el filtro: el de la lista nueva, el de los registros
+// anteriores a los estatus (con / sin sustento) o SIN_RESPUESTA.
+function estatusFiltroTransito(r) {
+  if (r.estatus_transportista) return r.estatus_transportista;
+  if (r.respuesta_transportista === "ADJUNTA_SUSTENTO") return "LEGADO_CON";
+  if (r.respuesta_transportista === "SIN_SUSTENTO") return "LEGADO_SIN";
+  return "SIN_RESPUESTA";
+}
+
+function filtrarTransitos(lista, f, isAdmin) {
+  const q = (f.busqueda || "").trim().toLowerCase();
+  return lista.filter(r => {
+    if (f.proveedor && r.proveedor !== f.proveedor) return false;
+    if (f.ruta && r.nombre_ruta_consolidada !== f.ruta) return false;
+    if (f.tipo && r.tipo_mercaderia !== f.tipo) return false;
+    if (f.estatus && estatusFiltroTransito(r) !== f.estatus) return false;
+    if (f.validacion && estadoTransito(r) !== f.validacion) return false;
+    if (f.semana && String(r.semana_llegada_estimada ?? "") !== f.semana) return false;
+    if (f.desde || f.hasta) {
+      const fecha = String(r.fecha_limite_transp || "").slice(0, 10);
+      if (!fecha) return false;
+      if (f.desde && fecha < f.desde) return false;
+      if (f.hasta && fecha > f.hasta) return false;
+    }
+    if (q) {
+      const campos = isAdmin
+        ? [r.nro_carga_final, r.nro_lpn_final, r.nombre_instalacion_final, r.nombre_ruta_consolidada, r.proveedor]
+        : [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_recibida, r.nombre_sucursal_recibida, r.nombre_ruta_consolidada];
+      if (!campos.some(v => String(v ?? "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+}
+
 
 const MOTIVOS_VALIDACION = [
   "N° GR mal digitado",
@@ -326,7 +365,7 @@ function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
   const esStart = d => d && selStart && fmt(d) === fmt(selStart);
   const esEnd   = d => d && selEnd   && fmt(d) === fmt(selEnd);
   const esHoy   = d => d && fmt(d) === fmt(hoy);
-  const rangoValido = selStart && selEnd && ((selEnd - selStart) / 86400000) <= 7;
+  const rangoValido = selStart && selEnd && ((selEnd - selStart) / 86400000) <= maxDias;
 
   // Formato estricto DD/MM/AAAA
   const fmtLocal = (isoStr) => {
@@ -430,8 +469,12 @@ export default function App() {
   const [transitoErr, setTransitoErr] = useState("");
   const [transitoValidarModal, setTransitoValidarModal] = useState(null); // { registro, accion: null|'APROBADO'|'DESAPROBADO' } (admin revisa y decide)
   const [transitoFotosUrls, setTransitoFotosUrls] = useState({}); // { [path]: signedUrl } para previsualizar sustentos
-  const [transitoBusqueda, setTransitoBusqueda] = useState("");
-  const [transitoFiltroEstado, setTransitoFiltroEstado] = useState("TODOS");
+  // Panel de filtros de Tránsitos: mismo patrón que el de Adicionales -- el
+  // panel edita un borrador y "Buscar" lo aplica.
+  const [transitoFiltros, setTransitoFiltros] = useState(FILTROS_TRANSITO_VACIOS);
+  const [transitoFiltrosDraft, setTransitoFiltrosDraft] = useState(FILTROS_TRANSITO_VACIOS);
+  const [transitoFilterOpen, setTransitoFilterOpen] = useState(false);
+  const [transitoRangoKey, setTransitoRangoKey] = useState(0); // fuerza a reiniciar el calendario al limpiar
   const [transitoMotivoDesaprobacion, setTransitoMotivoDesaprobacion] = useState("");
   const [transitoValidarSaving, setTransitoValidarSaving] = useState(false);
   const [dashProveedor, setDashProveedor] = useState("");
@@ -1176,6 +1219,23 @@ export default function App() {
     setTransitoResultadoIA(null);
   }
 
+  function abrirFiltrosTransito() {
+    setTransitoFiltrosDraft(transitoFiltros);
+    setTransitoFilterOpen(true);
+  }
+
+  function aplicarFiltrosTransito() {
+    setTransitoFiltros(transitoFiltrosDraft);
+    setTransitoFilterOpen(false);
+  }
+
+  // Limpia todo: lo aplicado y el borrador (igual que la ✕ de Adicionales).
+  function limpiarFiltrosTransito() {
+    setTransitoFiltros(FILTROS_TRANSITO_VACIOS);
+    setTransitoFiltrosDraft(FILTROS_TRANSITO_VACIOS);
+    setTransitoRangoKey(k => k + 1);
+  }
+
   function abrirRevisionTransito(r) {
     setTransitoValidarModal({ registro: r, accion: null });
     setTransitoMotivoDesaprobacion("");
@@ -1739,6 +1799,7 @@ export default function App() {
   }
 
   const filtrosActivos = fNroSpot || fRutas || fPlaca || fEstadoDoc || fEstFinal || fProveedor;
+  const filtrosTransitoActivos = Object.values(transitoFiltros).some(Boolean);
 
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><p style={{ color: GRAY_500, fontSize: 13 }}>Cargando...</p></div>;
 
@@ -1920,7 +1981,7 @@ export default function App() {
               ? (isAdmin ? "Seguimiento de tránsitos pendientes" : `${empresa} — Tránsitos pendientes`)
               : (isAdmin ? "Seguimiento General de Adicionales" : `${empresa} — Seguimiento de Adicionales`)}
           </span>
-          {filtrosActivos && vista !== "transitos" && (
+          {(vista === "transitos" ? filtrosTransitoActivos : filtrosActivos) && (
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
           )}
         </div>
@@ -1943,6 +2004,18 @@ export default function App() {
             <button onClick={openFilter}
               style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${filterOpen ? RED : BORDER}`, background: filterOpen ? RED : "white", color: filterOpen ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
               ⚙ Filtrar
+            </button>
+          </>
+        )}
+        {vista === "transitos" && enPilotoTransitos && (
+          <>
+            <button onClick={limpiarFiltrosTransito} title="Limpiar filtros"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            <button onClick={fetchTransitos} title="Actualizar"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>↻</button>
+            <button onClick={abrirFiltrosTransito}
+              style={{ height: 34, padding: "0 16px", borderRadius: 999, border: `0.5px solid ${transitoFilterOpen ? RED : BORDER}`, background: transitoFilterOpen ? RED : "white", color: transitoFilterOpen ? "white" : GRAY_900, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+              ⚙ Panel de filtros
             </button>
           </>
         )}
@@ -2012,6 +2085,104 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* DRAWER LATERAL -- TRÁNSITOS (mismo diseño que el de Adicionales) */}
+      {vista === "transitos" && enPilotoTransitos && transitoFilterOpen && (() => {
+        const d = transitoFiltrosDraft;
+        const setD = (campo, valor) => setTransitoFiltrosDraft(prev => ({ ...prev, [campo]: valor }));
+        const unicos = (fn) => [...new Set(transitos.map(fn).filter(v => v != null && v !== ""))];
+        const rutas = unicos(r => r.nombre_ruta_consolidada).sort((x, y) => String(x).localeCompare(String(y)));
+        const tipos = unicos(r => r.tipo_mercaderia).sort((x, y) => String(x).localeCompare(String(y)));
+        const semanas = unicos(r => r.semana_llegada_estimada).map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
+        const proveedores = unicos(r => r.proveedor).sort();
+        const hayLegadoCon = transitos.some(r => estatusFiltroTransito(r) === "LEGADO_CON");
+        const hayLegadoSin = transitos.some(r => estatusFiltroTransito(r) === "LEGADO_SIN");
+        const lbl = { fontSize: 11, fontWeight: 500, color: GRAY_900, marginBottom: 6 };
+        const campo = { ...inp, width: "100%", boxSizing: "border-box" };
+        return (
+        <div style={{ position: "fixed", inset: 0, zIndex: 40 }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.18)" }} onClick={() => setTransitoFilterOpen(false)} />
+          <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 320, background: "white", boxShadow: "-4px 0 24px rgba(0,0,0,.12)", display: "flex", flexDirection: "column", zIndex: 41 }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "18px 20px 14px", borderBottom: `0.5px solid ${BORDER}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: GRAY_900 }}>Panel de filtros</div>
+              <button onClick={() => setTransitoFilterOpen(false)} aria-label="Cerrar" style={{ width: 28, height: 28, borderRadius: "50%", border: `0.5px solid ${BORDER}`, background: "none", cursor: "pointer", fontSize: 14, color: GRAY_500, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}
+              onKeyDown={e => e.key === "Enter" && aplicarFiltrosTransito()}>
+              <div>
+                <div style={lbl}>Buscar</div>
+                <input value={d.busqueda} onChange={e => setD("busqueda", e.target.value)}
+                  placeholder={isAdmin ? "Carga, LPN, instalación, ruta o transportista" : "Carga, LPN, botica, código SAP o ruta"}
+                  style={campo} />
+              </div>
+              {isAdmin && (
+                <div>
+                  <div style={lbl}>Transportista</div>
+                  <select value={d.proveedor} onChange={e => setD("proveedor", e.target.value)} style={campo}>
+                    <option value="">Todos</option>
+                    {proveedores.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <div style={lbl}>Ruta</div>
+                <select value={d.ruta} onChange={e => setD("ruta", e.target.value)} style={campo}>
+                  <option value="">Todas</option>
+                  {rutas.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={lbl}>Tipo de mercadería</div>
+                <select value={d.tipo} onChange={e => setD("tipo", e.target.value)} style={campo}>
+                  <option value="">Todos</option>
+                  {tipos.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={lbl}>Estatus</div>
+                <select value={d.estatus} onChange={e => setD("estatus", e.target.value)} style={campo}>
+                  <option value="">Todos</option>
+                  <option value="SIN_RESPUESTA">Sin respuesta</option>
+                  {ESTATUS_TRANSITO.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
+                  {hayLegadoCon && <option value="LEGADO_CON">Con sustento (anterior)</option>}
+                  {hayLegadoSin && <option value="LEGADO_SIN">Sin sustento (anterior)</option>}
+                </select>
+              </div>
+              <div>
+                <div style={lbl}>Validación</div>
+                <select value={d.validacion} onChange={e => setD("validacion", e.target.value)} style={campo}>
+                  <option value="">Todas</option>
+                  {OPCIONES_VALIDACION_TRANSITO.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={lbl}>Semana</div>
+                <select value={d.semana} onChange={e => setD("semana", e.target.value)} style={campo}>
+                  <option value="">Todas</option>
+                  {semanas.map(n => <option key={n} value={String(n)}>SEM {n}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: GRAY_900 }}>Fecha límite</div>
+                  {(d.desde || d.hasta) && (
+                    <button onClick={() => { setD("desde", ""); setTransitoFiltrosDraft(prev => ({ ...prev, desde: "", hasta: "" })); setTransitoRangoKey(k => k + 1); }}
+                      style={{ background: "none", border: "none", padding: 0, fontSize: 10, color: RED_DARK, cursor: "pointer", textDecoration: "underline" }}>Quitar fechas</button>
+                  )}
+                </div>
+                <RangePicker key={transitoRangoKey} desde={d.desde} hasta={d.hasta} maxDias={366}
+                  onChange={({ desde, hasta }) => setTransitoFiltrosDraft(prev => ({ ...prev, desde, hasta }))} />
+              </div>
+            </div>
+            <div style={{ padding: "14px 20px", borderTop: `0.5px solid ${BORDER}`, display: "flex", gap: 8, flexShrink: 0 }}>
+              <button onClick={limpiarFiltrosTransito} style={{ flex: 1, padding: "9px 0", border: `0.5px solid ${BORDER}`, borderRadius: 8, fontSize: 12, cursor: "pointer", background: "none", color: GRAY_500, fontWeight: 500 }}>Limpiar</button>
+              <button onClick={aplicarFiltrosTransito} style={{ flex: 2, padding: "9px 0", background: RED, color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Buscar</button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* TABLA */}
       {vista === "tabla" && (
@@ -2763,52 +2934,13 @@ export default function App() {
         const colsTransitos = isAdmin
           ? [{ key: "proveedor", label: "Transportista", width: 110 }, ...COLS_TRANSITOS]
           : COLS_TRANSITOS_TRANSPORTISTA;
-        const conteoEstados = transitos.reduce((acc, r) => { const e = estadoTransito(r); acc[e] = (acc[e] || 0) + 1; return acc; }, {});
-        const q = transitoBusqueda.trim().toLowerCase();
-        const transitosFiltrados = transitos.filter(r => {
-          if (transitoFiltroEstado !== "TODOS" && estadoTransito(r) !== transitoFiltroEstado) return false;
-          if (!q) return true;
-          const campos = isAdmin
-            ? [r.nro_carga_final, r.nro_lpn_final, r.nombre_instalacion_final, r.nombre_ruta_consolidada, r.proveedor]
-            : [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_recibida, r.nombre_sucursal_recibida, r.nombre_ruta_consolidada];
-          return campos
-            .some(v => String(v ?? "").toLowerCase().includes(q));
-        });
+        const transitosFiltrados = filtrarTransitos(transitos, transitoFiltros, isAdmin);
         const badge = (bg, fg, label) => (
           <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600, background: bg, color: fg, whiteSpace: "nowrap" }}>{label}</span>
         );
         const btnFila = { padding: "5px 12px", background: "white", border: `1px solid ${BORDER}`, borderRadius: 7, fontSize: 11, fontWeight: 500, color: GRAY_900, cursor: "pointer", whiteSpace: "nowrap" };
         return (
         <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
-          {/* El admin ya tiene el título en la barra superior; el encabezado
-              con la explicación queda solo para el transportista. */}
-          {!isAdmin && (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 17, fontWeight: 600, color: GRAY_900 }}>Tránsitos</div>
-              <div style={{ fontSize: 12, color: GRAY_500, marginTop: 2 }}>
-                Bultos en ruta con retraso. Sustenta cada carga completa, o un bulto puntual si el sustento es parcial.
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <input value={transitoBusqueda} onChange={e => setTransitoBusqueda(e.target.value)}
-              placeholder={isAdmin ? "Buscar carga, LPN, instalación, ruta o transportista" : "Buscar carga, LPN, botica, código SAP o ruta"}
-              style={{ ...inp, width: 300, maxWidth: "100%" }} />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {FILTROS_ESTADO_TRANSITO.map(f => {
-                const activo = transitoFiltroEstado === f.key;
-                const n = f.key === "TODOS" ? transitos.length : (conteoEstados[f.key] || 0);
-                return (
-                  <button key={f.key} onClick={() => setTransitoFiltroEstado(f.key)} aria-pressed={activo}
-                    style={{ padding: "5px 10px", borderRadius: 999, border: `0.5px solid ${activo ? RED : BORDER}`, background: activo ? RED_LIGHT : "white", color: activo ? RED_DARK : GRAY_900, fontSize: 11, fontWeight: activo ? 600 : 500, cursor: "pointer", whiteSpace: "nowrap" }}>
-                    {f.label} <span style={{ color: activo ? RED_DARK : GRAY_500 }}>{n}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           {transitosLoading ? (
             <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>Cargando...</div>
           ) : transitosErr ? (
@@ -2820,8 +2952,8 @@ export default function App() {
             <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>No hay bultos en ruta con retraso.</div>
           ) : transitosFiltrados.length === 0 ? (
             <div style={{ fontSize: 12, color: GRAY_500, padding: "24px 0" }}>
-              Ningún bulto coincide con la búsqueda o el filtro.{" "}
-              <button onClick={() => { setTransitoBusqueda(""); setTransitoFiltroEstado("TODOS"); }}
+              Ningún bulto coincide con los filtros.{" "}
+              <button onClick={limpiarFiltrosTransito}
                 style={{ background: "none", border: "none", padding: 0, color: RED_DARK, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>Limpiar filtros</button>
             </div>
           ) : (
