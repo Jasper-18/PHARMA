@@ -425,6 +425,89 @@ function RangePicker({ desde, hasta, maxDias = 31, onChange }) {
   );
 }
 
+const fmtSoles = v => `S/ ${Number(v || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Gráfico de cascada: misma lógica y diseño que "Estatus de Tickets para
+// Migrar" del dashboard de Adicionales (eje Y con números redondos, líneas
+// guía y conectores punteados). Recibe la barra total, las restas y la final.
+function GraficoCascada({ total, totalLabel, restas, final }) {
+  const ALTO_PX = 170;
+  const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
+  let acumulado = total;
+  const barrasResta = restas.map(r => {
+    const base = acumulado - r.val;
+    const barra = { ...r, base, landing: base };
+    acumulado = base;
+    return barra;
+  });
+  const barras = [
+    { label: totalLabel, lineas: [totalLabel], val: total, base: 0, color: "#c20000", landing: total },
+    ...barrasResta,
+    { ...final, base: 0, landing: null },
+  ];
+  const rawStep = total > 0 ? total / 4 : 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const niceMult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  const step = niceMult * mag;
+  const numTicks = total > 0 ? Math.ceil(total / step) : 4;
+  const ejeMax = step * numTicks;
+  const ticks = Array.from({ length: numTicks + 1 }, (_, i) => step * i);
+  const escala = ejeMax > 0 ? ALTO_PX / ejeMax : 0;
+  const N = barras.length;
+  const colPct = 100 / N;
+  const margenPct = colPct * 0.06;
+  return (
+    <>
+      <div style={{ display: "flex" }}>
+        <div style={{ position: "relative", width: 32, height: ALTO_PX, flexShrink: 0 }}>
+          {ticks.map(t => (
+            <div key={t} style={{ position: "absolute", bottom: t * escala - 6, right: 6, fontSize: 9, color: GRAY_500 }}>{t}</div>
+          ))}
+        </div>
+        <div style={{ position: "relative", flex: 1, height: ALTO_PX }}>
+          {ticks.map(t => (
+            <div key={t} style={{ position: "absolute", left: 0, right: 0, bottom: t * escala, borderTop: `1px dashed ${GRAY_200}` }} />
+          ))}
+          {barras.slice(0, -1).map((b, i) => b.landing === null ? null : (
+            <div key={`conn-${i}`} style={{
+              position: "absolute", bottom: b.landing * escala,
+              left: `calc(${(i + 1) * colPct}% - ${margenPct}%)`,
+              width: `${margenPct * 2}%`,
+              borderTop: `1.5px dotted ${GRAY_500}`,
+            }} />
+          ))}
+          {barras.map((b, i) => (
+            <div key={b.label}
+              title={b.onClick ? `${b.label}: ${b.val} (${pct(b.val)}%) — clic para ver el detalle` : b.label}
+              onClick={b.onClick}
+              style={{
+                position: "absolute",
+                left: `calc(${i * colPct}% + ${margenPct}%)`,
+                width: `${colPct - margenPct * 2}%`,
+                bottom: b.base * escala,
+                height: Math.max(b.val * escala, b.val > 0 ? 3 : 0),
+                background: b.color, borderRadius: 3,
+                cursor: b.onClick ? "pointer" : "default",
+              }}>
+              <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%)", textAlign: "center", fontSize: 11, fontWeight: 600, color: GRAY_900, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+                {b.val} ({pct(b.val)}%)
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "flex", marginLeft: 32 }}>
+        {barras.map((b, i) => (
+          <div key={i} style={{ flex: 1, fontSize: 10, color: GRAY_500, textAlign: "center", marginTop: 8, lineHeight: 1.3 }}>
+            {(b.lineas || [b.label]).map((linea, j) => <div key={j}>{linea}</div>)}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // Calendario de un solo día, con el mismo diseño que RangePicker. Los días
 // anteriores a "min" se ven apagados y no se pueden elegir.
 function DatePicker({ value, min, onChange }) {
@@ -539,6 +622,12 @@ export default function App() {
   const [transitoFiltrosDraft, setTransitoFiltrosDraft] = useState(FILTROS_TRANSITO_VACIOS);
   const [transitoFilterOpen, setTransitoFilterOpen] = useState(false);
   const [transitoRangoKey, setTransitoRangoKey] = useState(0);
+  // Dashboard de Tránsitos (admin): filtros que se aplican al instante, como
+  // en el dashboard de Adicionales.
+  const [dashT, setDashT] = useState(FILTROS_TRANSITO_VACIOS);
+  const [dashTFechaAbierta, setDashTFechaAbierta] = useState(false);
+  const [dashTRangoKey, setDashTRangoKey] = useState(0);
+  const [rankingTSort, setRankingTSort] = useState({ col: "total", dir: "desc" });
   // Reprogramación de fecha límite (transportista)
   const [reprogModal, setReprogModal] = useState(null); // registro desde el que se abrió
   const [reprogFecha, setReprogFecha] = useState("");
@@ -722,7 +811,7 @@ export default function App() {
     setTransitosLoading(false);
   }, [session]);
 
-  useEffect(() => { if (session && vista === "transitos") fetchTransitos(); }, [session, vista, fetchTransitos]);
+  useEffect(() => { if (session && (vista === "transitos" || vista === "dashboard_transitos")) fetchTransitos(); }, [session, vista, fetchTransitos]);
 
   // Firma las fotos del sustento del registro abierto (en cualquiera de los 2
   // modales) para poder mostrarlas como miniatura. El bucket es privado, así
@@ -2099,6 +2188,17 @@ export default function App() {
                 Tránsitos
               </button>
             )}
+            {isAdmin && enPilotoTransitos && (
+              <button onClick={() => setVista("dashboard_transitos")}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: 8, border: "none", background: vista === "dashboard_transitos" ? RED_LIGHT : "transparent", color: vista === "dashboard_transitos" ? RED_DARK : GRAY_900, fontSize: 12, fontWeight: vista === "dashboard_transitos" ? 600 : 500, cursor: "pointer", textAlign: "left", marginTop: 4 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <line x1="18" y1="20" x2="18" y2="10"></line>
+                  <line x1="12" y1="20" x2="12" y2="4"></line>
+                  <line x1="6" y1="20" x2="6" y2="14"></line>
+                </svg>
+                Dashboard Tránsitos
+              </button>
+            )}
           </div>
         )}
 
@@ -2109,11 +2209,13 @@ export default function App() {
       <div style={{ background: "white", borderBottom: `0.5px solid ${BORDER}`, padding: "7px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, lineHeight: 1 }}>
-            {vista === "transitos"
+            {vista === "dashboard_transitos"
+              ? "Seguimiento general de Tránsitos pendientes"
+              : vista === "transitos"
               ? (isAdmin ? "Seguimiento de tránsitos pendientes" : `${empresa} — Tránsitos pendientes`)
               : (isAdmin ? "Seguimiento General de Adicionales" : `${empresa} — Seguimiento de Adicionales`)}
           </span>
-          {(vista === "transitos" ? filtrosTransitoActivos : filtrosActivos) && (
+          {(vista === "transitos" ? filtrosTransitoActivos : vista === "dashboard_transitos" ? false : filtrosActivos) && (
             <span style={{ fontSize: 10, fontWeight: 500, color: RED }}>Filtros activos</span>
           )}
         </div>
@@ -2792,6 +2894,234 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* DASHBOARD DE TRÁNSITOS (admin) -- mismo diseño que el de Adicionales */}
+      {vista === "dashboard_transitos" && isAdmin && enPilotoTransitos && (() => {
+        const datos = filtrarTransitos(transitos, dashT, true);
+        const setF = (campo, valor) => setDashT(prev => ({ ...prev, [campo]: valor }));
+        const unicos = (fn) => [...new Set(transitos.map(fn).filter(v => v != null && v !== ""))];
+        const proveedores = unicos(r => r.proveedor).sort();
+        const rutas = unicos(r => r.nombre_ruta_consolidada).sort((x, y) => String(x).localeCompare(String(y)));
+        const tipos = unicos(r => r.tipo_mercaderia).sort((x, y) => String(x).localeCompare(String(y)));
+        const semanas = unicos(r => r.semana_llegada_estimada).map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
+
+        // Pendiente de sustentar = lo que todavía le toca al transportista.
+        const pendienteSustento = r => ["SIN_RESPUESTA", "PENDIENTE_ENTREGA", "DESAPROBADO"].includes(estadoTransito(r));
+        const cuenta = fn => datos.filter(fn).length;
+        const total = datos.length;
+        const nPendientes = cuenta(pendienteSustento);
+        const valorizado = datos.reduce((a, r) => a + (Number(r.costo_total) || 0), 0);
+        const valorizadoPend = datos.filter(pendienteSustento).reduce((a, r) => a + (Number(r.costo_total) || 0), 0);
+        const nObservadosIA = cuenta(r => r.estado_validacion_ia === "NO_COINCIDE");
+        const nPorValidar = cuenta(r => estadoTransito(r) === "POR_VALIDAR");
+        const nAprobados = cuenta(r => estadoTransito(r) === "APROBADO");
+        const nAprobadosIA = cuenta(r => estadoTransito(r) === "APROBADO" && r.validado_por === "IA");
+
+        // Clic en una barra: abre Tránsitos con los filtros del dashboard más
+        // el del tramo elegido.
+        const irA = (extra) => () => {
+          setTransitoFiltros({ ...dashT, ...extra });
+          setTransitoFiltrosDraft({ ...dashT, ...extra });
+          setTransitoRangoKey(k => k + 1);
+          setVista("transitos");
+        };
+        const porValidar = r => estadoTransito(r) === "POR_VALIDAR";
+        const restas = [
+          { label: "Sin respuesta", lineas: ["Sin respuesta", "(Transportista)"], val: cuenta(r => estadoTransito(r) === "SIN_RESPUESTA"), color: "#ff7676", onClick: irA({ estatus: "SIN_RESPUESTA", validacion: "" }) },
+          { label: "Pendiente de entrega", lineas: ["Pendiente", "de entrega"], val: cuenta(r => estadoTransito(r) === "PENDIENTE_ENTREGA"), color: "#ff4040", onClick: irA({ estatus: "PENDIENTE_ENTREGA", validacion: "" }) },
+          { label: "Desaprobado", lineas: ["Desaprobado", "(Por resustentar)"], val: cuenta(r => estadoTransito(r) === "DESAPROBADO"), color: "#ff0000", onClick: irA({ estatus: "", validacion: "DESAPROBADO" }) },
+          { label: "Observado IA", lineas: ["Observado IA"], val: cuenta(r => porValidar(r) && r.estado_validacion_ia === "NO_COINCIDE"), color: "#e00000", onClick: irA({ estatus: "", validacion: "POR_VALIDAR" }) },
+          { label: "Pendiente validación", lineas: ["Pendiente validación", "(Admin)"], val: cuenta(r => porValidar(r) && r.estado_validacion_ia !== "NO_COINCIDE"), color: "#c00000", onClick: irA({ estatus: "", validacion: "POR_VALIDAR" }) },
+          { label: "No sustentado", lineas: ["No sustentado", "(Siniestro)"], val: cuenta(r => estadoTransito(r) === "NO_SUSTENTADO"), color: "#a00000", onClick: irA({ estatus: "", validacion: "NO_SUSTENTADO" }) },
+        ];
+        const final = { label: "Aprobados", lineas: ["Aprobados"], val: nAprobados, color: GREEN, onClick: irA({ estatus: "", validacion: "APROBADO" }) };
+
+        // Ranking: avance = bultos que el transportista ya no tiene pendientes.
+        const porProveedor = {};
+        for (const r of datos) {
+          const k = r.proveedor || "";
+          const g = porProveedor[k] || (porProveedor[k] = { proveedor: r.proveedor, total: 0, pendiente: 0, por_validar: 0, aprobados: 0, valorizado_pend: 0 });
+          g.total++;
+          if (pendienteSustento(r)) { g.pendiente++; g.valorizado_pend += Number(r.costo_total) || 0; }
+          if (estadoTransito(r) === "POR_VALIDAR") g.por_validar++;
+          if (estadoTransito(r) === "APROBADO") g.aprobados++;
+        }
+        const ranking = Object.values(porProveedor).map(g => ({ ...g, pct_avance: g.total > 0 ? Math.round(((g.total - g.pendiente) / g.total) * 1000) / 10 : 0 }));
+        const { col, dir } = rankingTSort;
+        ranking.sort((a, b) => {
+          if (col === "proveedor") return dir === "desc" ? String(b.proveedor || "").localeCompare(String(a.proveedor || "")) : String(a.proveedor || "").localeCompare(String(b.proveedor || ""));
+          return dir === "desc" ? (b[col] || 0) - (a[col] || 0) : (a[col] || 0) - (b[col] || 0);
+        });
+
+        const sel = { ...inp, width: 150 };
+        const etiqueta = t => <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>{t}</div>;
+        const badgePct = (p, invertido) => {
+          const bueno = invertido ? p <= 30 : p >= 70;
+          const medio = invertido ? p <= 60 : p >= 40;
+          const c = bueno ? GREEN : medio ? AMBER : RED_DARK;
+          const bg = bueno ? GREEN_LIGHT : medio ? AMBER_LIGHT : RED_LIGHT;
+          return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p}%</span>;
+        };
+        const td = { padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` };
+
+        return (
+        <div style={{ flex: 1, padding: "14px 18px", overflow: "auto" }}>
+
+          {/* Filtros (mismos que el panel de Tránsitos, sin el buscador) */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 16, paddingBottom: 14, borderBottom: `0.5px solid ${BORDER}` }}>
+            <div>{etiqueta("Transportista")}
+              <select value={dashT.proveedor} onChange={e => setF("proveedor", e.target.value)} style={sel}>
+                <option value="">Todos</option>
+                {proveedores.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>{etiqueta("Ruta")}
+              <select value={dashT.ruta} onChange={e => setF("ruta", e.target.value)} style={sel}>
+                <option value="">Todas</option>
+                {rutas.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>{etiqueta("Tipo de mercadería")}
+              <select value={dashT.tipo} onChange={e => setF("tipo", e.target.value)} style={sel}>
+                <option value="">Todos</option>
+                {tipos.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>{etiqueta("Estatus")}
+              <select value={dashT.estatus} onChange={e => setF("estatus", e.target.value)} style={sel}>
+                <option value="">Todos</option>
+                <option value="SIN_RESPUESTA">Sin respuesta</option>
+                {ESTATUS_TRANSITO.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
+              </select>
+            </div>
+            <div>{etiqueta("Validación")}
+              <select value={dashT.validacion} onChange={e => setF("validacion", e.target.value)} style={sel}>
+                <option value="">Todas</option>
+                {OPCIONES_VALIDACION_TRANSITO.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>{etiqueta("Semana")}
+              <select value={dashT.semana} onChange={e => setF("semana", e.target.value)} style={{ ...inp, width: 110 }}>
+                <option value="">Todas</option>
+                {semanas.map(n => <option key={n} value={String(n)}>SEM {n}</option>)}
+              </select>
+            </div>
+            <div style={{ position: "relative" }}>
+              {etiqueta("Fecha límite")}
+              <button onClick={() => setDashTFechaAbierta(a => !a)}
+                style={{ ...inp, width: 220, textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                {dashT.desde && dashT.hasta ? `${fmtFechaSolo(dashT.desde)} al ${fmtFechaSolo(dashT.hasta)}` : "Seleccionar fechas"}
+                <span style={{ fontSize: 9, transform: dashTFechaAbierta ? "rotate(180deg)" : "none" }}>▼</span>
+              </button>
+              {dashTFechaAbierta && (
+                <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 6, background: "white", border: `0.5px solid ${BORDER}`, borderRadius: 10, padding: 12, zIndex: 50, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", width: 260 }}>
+                  <RangePicker key={dashTRangoKey} desde={dashT.desde} hasta={dashT.hasta} maxDias={366}
+                    onChange={({ desde, hasta }) => { setDashT(prev => ({ ...prev, desde, hasta })); setDashTFechaAbierta(false); }} />
+                </div>
+              )}
+            </div>
+            <button onClick={() => { setDashT(FILTROS_TRANSITO_VACIOS); setDashTRangoKey(k => k + 1); setDashTFechaAbierta(false); }}
+              style={{ height: 34, padding: "0 14px", borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 12 }}>
+              Limpiar filtros
+            </button>
+            <button onClick={fetchTransitos} title="Actualizar"
+              style={{ width: 34, height: 34, borderRadius: 999, border: `0.5px solid ${BORDER}`, background: "white", color: GRAY_500, cursor: "pointer", fontSize: 16 }}>↻</button>
+            {transitosLoading && <span style={{ fontSize: 11, color: GRAY_500 }}>Actualizando…</span>}
+          </div>
+
+          {transitosErr && (
+            <div style={{ padding: "10px 14px", background: RED_LIGHT, borderRadius: 8, fontSize: 12, color: RED_DARK, marginBottom: 16 }}>
+              No se pudieron cargar los tránsitos: {transitosErr}
+            </div>
+          )}
+
+          {/* Tarjetas */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
+            <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Bultos pendientes</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{nPendientes} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {total}</span></div>
+                {badgePct(total > 0 ? Math.round((nPendientes / total) * 100) : 0, true)}
+              </div>
+            </div>
+            <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Valorizado</div>
+              <div style={{ fontSize: 22, fontWeight: 600, color: GRAY_900 }}>{fmtSoles(valorizado)}</div>
+              <div style={{ fontSize: 11, color: GRAY_500, marginTop: 2 }}>{fmtSoles(valorizadoPend)} pendiente de sustentar</div>
+            </div>
+            <div style={{ background: RED_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: RED_DARK, marginBottom: 6 }}>Observados por IA</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: RED_DARK }}>{nObservadosIA}</div>
+            </div>
+            <div style={{ background: AMBER_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: AMBER, marginBottom: 6 }}>Pendiente de validar</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: AMBER }}>{nPorValidar}</div>
+            </div>
+            <div style={{ background: GREEN_LIGHT, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: GREEN, marginBottom: 6 }}>Aprobados</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: GREEN }}>{nAprobados}</div>
+              {nAprobados > 0 && <div style={{ fontSize: 11, color: GREEN, marginTop: 2 }}>{nAprobadosIA} por IA, {nAprobados - nAprobadosIA} por el admin</div>}
+            </div>
+          </div>
+
+          {/* Cascada */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900, marginBottom: 34 }}>Estatus de tránsitos pendientes</div>
+            {total === 0
+              ? <div style={{ fontSize: 12, color: GRAY_500, padding: "12px 0" }}>Sin bultos para los filtros seleccionados.</div>
+              : <GraficoCascada total={total} totalLabel="Total tránsitos" restas={restas} final={final} />}
+          </div>
+
+          {/* Ranking por transportista */}
+          <div style={{ marginBottom: 28, display: "inline-block" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: GRAY_900 }}>Ranking por transportista</div>
+              <div title="Hora del corte -- se actualiza sola" style={{ fontSize: 11, color: GRAY_500, background: GRAY_50, border: `0.5px solid ${BORDER}`, borderRadius: 8, padding: "4px 10px" }}>
+                Corte: <span style={{ fontWeight: 600, color: GRAY_900 }}>{fmtFechaHora(horaActual)}</span>
+              </div>
+            </div>
+            <div style={{ overflowX: "auto", background: "white", borderRadius: 10, border: `0.5px solid ${BORDER}` }}>
+              <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: GRAY_50 }}>
+                    {[
+                      { h: "Proveedor", k: "proveedor" },
+                      { h: "Bultos", k: "total" },
+                      { h: "Pend. sustento", k: "pendiente" },
+                      { h: "Pendiente validación", k: "por_validar" },
+                      { h: "Aprobados", k: "aprobados" },
+                      { h: "Valorizado pendiente", k: "valorizado_pend" },
+                      { h: "% Avance de cumplimiento", k: "pct_avance" },
+                    ].map(({ h, k }, i, arr) => (
+                      <th key={h} onClick={() => setRankingTSort(prev => prev.col === k ? { col: k, dir: prev.dir === "desc" ? "asc" : "desc" } : { col: k, dir: "desc" })}
+                        style={{ padding: "8px 8px", textAlign: "center", fontSize: 10, fontWeight: 500, color: GRAY_500, textTransform: "uppercase", letterSpacing: ".03em", borderBottom: `0.5px solid ${BORDER}`, borderRight: i < arr.length - 1 ? `0.5px solid ${BORDER}` : "none", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                        {h} {col === k && (dir === "desc" ? "▼" : "▲")}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranking.map(r => (
+                    <tr key={r.proveedor || "sin-proveedor"}>
+                      <td style={{ ...td, color: r.proveedor ? GRAY_900 : GRAY_500, fontStyle: r.proveedor ? "normal" : "italic" }}>{r.proveedor || "FALTA ASIGNAR"}</td>
+                      <td style={td}>{r.total}</td>
+                      <td style={{ ...td, color: r.pendiente > 0 ? RED_DARK : GRAY_900 }}>{r.pendiente}</td>
+                      <td style={{ ...td, color: r.por_validar > 0 ? AMBER : GRAY_900 }}>{r.por_validar}</td>
+                      <td style={{ ...td, color: GREEN }}>{r.aprobados}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtSoles(r.valorizado_pend)}</td>
+                      <td style={{ ...td, borderRight: "none" }}>{badgePct(r.pct_avance, false)}</td>
+                    </tr>
+                  ))}
+                  {ranking.length === 0 && (
+                    <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: GRAY_500 }}>Sin datos para los filtros seleccionados</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* PANEL TÉCNICO */}
       {vista === "tecnico" && isAdmin && (
