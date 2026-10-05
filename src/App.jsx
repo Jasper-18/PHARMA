@@ -432,7 +432,15 @@ const fmtSoles = v => `S/ ${Number(v || 0).toLocaleString("es-PE", { minimumFrac
 // guía y conectores punteados). Recibe la barra total, las restas y la final.
 function GraficoCascada({ total, totalLabel, restas, final }) {
   const ALTO_PX = 170;
-  const pct = v => total > 0 ? Math.round((v / total) * 100) : 0;
+  // Porcentaje con 1 decimal solo cuando el redondeo engañaría (ej. 3106 de
+  // 3108 no es "100%", y 2 de 3108 no es "0%").
+  const pct = v => {
+    if (!(total > 0)) return 0;
+    const p = (v / total) * 100;
+    const r = Math.round(p);
+    if ((r === 100 && v < total) || (r === 0 && v > 0)) return Math.max(0.1, Math.min(99.9, Math.round(p * 10) / 10));
+    return r;
+  };
   let acumulado = total;
   const barrasResta = restas.map(r => {
     const base = acumulado - r.val;
@@ -443,7 +451,7 @@ function GraficoCascada({ total, totalLabel, restas, final }) {
   const barras = [
     { label: totalLabel, lineas: [totalLabel], val: total, base: 0, color: "#c20000", landing: total },
     ...barrasResta,
-    { ...final, base: 0, landing: null },
+    ...(final ? [{ ...final, base: 0, landing: null }] : []),
   ];
   const rawStep = total > 0 ? total / 4 : 1;
   const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
@@ -2925,16 +2933,16 @@ export default function App() {
           setTransitoRangoKey(k => k + 1);
           setVista("transitos");
         };
-        const porValidar = r => estadoTransito(r) === "POR_VALIDAR";
+        // Un tramo por cada valor del campo Estatus (mismo orden y colores que
+        // en la tabla). Juntos suman el total.
         const restas = [
-          { label: "Sin respuesta", lineas: ["Sin respuesta", "(Transportista)"], val: cuenta(r => estadoTransito(r) === "SIN_RESPUESTA"), color: "#ff7676", onClick: irA({ estatus: "SIN_RESPUESTA", validacion: "" }) },
-          { label: "Pendiente de entrega", lineas: ["Pendiente", "de entrega"], val: cuenta(r => estadoTransito(r) === "PENDIENTE_ENTREGA"), color: "#ff4040", onClick: irA({ estatus: "PENDIENTE_ENTREGA", validacion: "" }) },
-          { label: "Desaprobado", lineas: ["Desaprobado", "(Por resustentar)"], val: cuenta(r => estadoTransito(r) === "DESAPROBADO"), color: "#ff0000", onClick: irA({ estatus: "", validacion: "DESAPROBADO" }) },
-          { label: "Observado IA", lineas: ["Observado IA"], val: cuenta(r => porValidar(r) && r.estado_validacion_ia === "NO_COINCIDE"), color: "#e00000", onClick: irA({ estatus: "", validacion: "POR_VALIDAR" }) },
-          { label: "Pendiente validación", lineas: ["Pendiente validación", "(Admin)"], val: cuenta(r => porValidar(r) && r.estado_validacion_ia !== "NO_COINCIDE"), color: "#c00000", onClick: irA({ estatus: "", validacion: "POR_VALIDAR" }) },
-          { label: "No sustentado", lineas: ["No sustentado", "(Siniestro)"], val: cuenta(r => estadoTransito(r) === "NO_SUSTENTADO"), color: "#a00000", onClick: irA({ estatus: "", validacion: "NO_SUSTENTADO" }) },
+          { label: "Sin respuesta", lineas: ["Sin respuesta"], val: cuenta(r => estatusFiltroTransito(r) === "SIN_RESPUESTA"), color: "#ff4040", onClick: irA({ estatus: "SIN_RESPUESTA", validacion: "" }) },
+          ...ESTATUS_TRANSITO.map(e => ({
+            label: e.label, lineas: [e.label], val: cuenta(r => estatusFiltroTransito(r) === e.key), color: e.fg,
+            onClick: irA({ estatus: e.key, validacion: "" }),
+          })),
         ];
-        const final = { label: "Aprobados", lineas: ["Aprobados"], val: nAprobados, color: GREEN, onClick: irA({ estatus: "", validacion: "APROBADO" }) };
+        const final = null;
 
         // Ranking: avance = bultos que el transportista ya no tiene pendientes.
         const porProveedor = {};
