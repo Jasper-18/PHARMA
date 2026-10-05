@@ -70,6 +70,24 @@ const COLS_TRANSITOS = [
   { key: "estado_validacion_admin", label: "Validación", width: 120 },
 ];
 
+// Columnas de la vista del transportista: sin Instalación, con la botica de
+// destino (código SAP + nombre) después de la ruta y la semana antes de la
+// fecha límite. La vista del admin sigue usando COLS_TRANSITOS.
+const COLS_TRANSITOS_TRANSPORTISTA = [
+  { key: "nro_carga_final",          label: "N° Carga",   width: 130, mono: true },
+  { key: "nro_lpn_final",            label: "N° LPN",     width: 150, mono: true },
+  { key: "nombre_ruta_consolidada",  label: "Ruta",       width: 140 },
+  { key: "cod_sucursal_recibida",    label: "Cód. SAP",   width: 80,  mono: true },
+  { key: "nombre_sucursal_recibida", label: "Botica",     width: 170 },
+  { key: "tipo_mercaderia",          label: "Tipo Mercadería", width: 110 },
+  { key: "costo_total",              label: "Costo",      width: 90 },
+  { key: "semana_llegada_estimada",  label: "Semana",     width: 70 },
+  { key: "fecha_limite_transp",      label: "Fecha Límite", width: 110 },
+  { key: "respuesta_transportista",  label: "Estatus",    width: 140 },
+  { key: "estado_validacion_ia",     label: "Validación IA", width: 120 },
+  { key: "estado_validacion_admin",  label: "Validación", width: 120 },
+];
+
 // Estatus que elige el transportista para cada bulto. Los que requieren foto
 // pasan por la lectura automática (api/procesar-sustento-transitos.js): si la
 // IA encuentra el N° de LPN en la foto, el bulto se aprueba solo; si no, queda
@@ -2744,13 +2762,16 @@ export default function App() {
       {vista === "transitos" && enPilotoTransitos && (() => {
         const colsTransitos = isAdmin
           ? [{ key: "proveedor", label: "Transportista", width: 110 }, ...COLS_TRANSITOS]
-          : COLS_TRANSITOS;
+          : COLS_TRANSITOS_TRANSPORTISTA;
         const conteoEstados = transitos.reduce((acc, r) => { const e = estadoTransito(r); acc[e] = (acc[e] || 0) + 1; return acc; }, {});
         const q = transitoBusqueda.trim().toLowerCase();
         const transitosFiltrados = transitos.filter(r => {
           if (transitoFiltroEstado !== "TODOS" && estadoTransito(r) !== transitoFiltroEstado) return false;
           if (!q) return true;
-          return [r.nro_carga_final, r.nro_lpn_final, r.nombre_instalacion_final, r.nombre_ruta_consolidada, isAdmin ? r.proveedor : null]
+          const campos = isAdmin
+            ? [r.nro_carga_final, r.nro_lpn_final, r.nombre_instalacion_final, r.nombre_ruta_consolidada, r.proveedor]
+            : [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_recibida, r.nombre_sucursal_recibida, r.nombre_ruta_consolidada];
+          return campos
             .some(v => String(v ?? "").toLowerCase().includes(q));
         });
         const badge = (bg, fg, label) => (
@@ -2772,7 +2793,7 @@ export default function App() {
 
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <input value={transitoBusqueda} onChange={e => setTransitoBusqueda(e.target.value)}
-              placeholder={isAdmin ? "Buscar carga, LPN, instalación, ruta o transportista" : "Buscar carga, LPN, instalación o ruta"}
+              placeholder={isAdmin ? "Buscar carga, LPN, instalación, ruta o transportista" : "Buscar carga, LPN, botica, código SAP o ruta"}
               style={{ ...inp, width: 300, maxWidth: "100%" }} />
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {FILTROS_ESTADO_TRANSITO.map(f => {
@@ -2862,6 +2883,8 @@ export default function App() {
                           else content = <span style={{ color: GRAY_200 }}>—</span>;
                         } else if (c.key === "costo_total") {
                           content = r.costo_total != null ? Number(r.costo_total).toFixed(2) : "—";
+                        } else if (c.key === "semana_llegada_estimada") {
+                          content = r.semana_llegada_estimada != null ? `SEM ${r.semana_llegada_estimada}` : "—";
                         } else if (c.key === "fecha_limite_transp") {
                           content = r.fecha_limite_transp ? fmtFechaSolo(r.fecha_limite_transp) : "—";
                         } else {
