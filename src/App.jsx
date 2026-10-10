@@ -156,7 +156,7 @@ const FILTROS_TRANSITO_VACIOS = {
 
 // Opciones del filtro "Validación": los mismos valores de la columna.
 const OPCIONES_VALIDACION_TRANSITO = [
-  { key: "SIN_RESPUESTA", label: "Pendiente de entrega" },
+  { key: "SIN_RESPUESTA", label: "Sin respuesta" },
   { key: "POR_VALIDAR",   label: "Por validar" },
   { key: "APROBADO",      label: "Aprobado" },
   { key: "DESAPROBADO",   label: "Desaprobado" },
@@ -818,7 +818,16 @@ export default function App() {
     setTransitosLoading(false);
   }, [session]);
 
-  useEffect(() => { if (session && (vista === "transitos" || vista === "dashboard_transitos")) fetchTransitos(); }, [session, vista, fetchTransitos]);
+  // Los tránsitos se cargan UNA vez por sesión (la primera vez que se entra a
+  // Tránsitos o a su dashboard). Cambiar de página ya no recarga: para traer
+  // datos nuevos está el botón ↻ (Actualizar).
+  const transitosCargadosRef = useRef(null); // id del usuario cuyos tránsitos ya se cargaron
+  useEffect(() => {
+    if (!session || (vista !== "transitos" && vista !== "dashboard_transitos")) return;
+    if (transitosCargadosRef.current === session.user.id) return;
+    transitosCargadosRef.current = session.user.id;
+    fetchTransitos();
+  }, [session, vista, fetchTransitos]);
 
   // Firma las fotos del sustento del registro abierto (en cualquiera de los 2
   // modales) para poder mostrarlas como miniatura. El bucket es privado, así
@@ -2377,7 +2386,7 @@ export default function App() {
                 <div style={lbl}>Estatus</div>
                 <select value={d.estatus} onChange={e => setD("estatus", e.target.value)} style={campo}>
                   <option value="">Todos</option>
-                  <option value="SIN_RESPUESTA">Sin respuesta</option>
+                  <option value="SIN_RESPUESTA">Pendiente de entrega</option>
                   {ESTATUS_TRANSITO.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
                 </select>
               </div>
@@ -2930,7 +2939,7 @@ export default function App() {
         // Un tramo por cada valor del campo Estatus (mismo orden y colores que
         // en la tabla). Juntos suman el total.
         const restas = [
-          { label: "Sin respuesta", lineas: ["Sin respuesta"], val: cuenta(r => estatusFiltroTransito(r) === "SIN_RESPUESTA"), color: "#ff4040", onClick: irA({ estatus: "SIN_RESPUESTA", validacion: "" }) },
+          { label: "Pendiente de entrega", lineas: ["Pendiente de entrega"], val: cuenta(r => estatusFiltroTransito(r) === "SIN_RESPUESTA"), color: "#ff4040", onClick: irA({ estatus: "SIN_RESPUESTA", validacion: "" }) },
           ...ESTATUS_TRANSITO.map(e => ({
             label: e.label, lineas: [e.label], val: cuenta(r => estatusFiltroTransito(r) === e.key), color: e.fg,
             onClick: irA({ estatus: e.key, validacion: "" }),
@@ -2993,7 +3002,7 @@ export default function App() {
             <div>{etiqueta("Estatus")}
               <select value={dashT.estatus} onChange={e => setF("estatus", e.target.value)} style={sel}>
                 <option value="">Todos</option>
-                <option value="SIN_RESPUESTA">Sin respuesta</option>
+                <option value="SIN_RESPUESTA">Pendiente de entrega</option>
                 {ESTATUS_TRANSITO.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
               </select>
             </div>
@@ -3438,14 +3447,14 @@ export default function App() {
                         if (c.key === "respuesta_transportista") {
                           const def = ESTATUS_TRANSITO_POR_KEY[r.estatus_transportista];
                           const b = def ? badge(def.bg, def.fg, def.label.toUpperCase())
-                            : badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
+                            : badge(GRAY_100, GRAY_500, "PENDIENTE DE ENTREGA");
                           content = b;
                         } else if (c.key === "estado_validacion_admin") {
                           const nota = notaIATransito(r);
                           const conNota = (b) => nota ? (
                             <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>{nota}</div></div>
                           ) : b;
-                          if (estado === "SIN_RESPUESTA") content = badge(GRAY_100, GRAY_500, "PENDIENTE DE ENTREGA");
+                          if (estado === "SIN_RESPUESTA") content = badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
                           else if (estado === "POR_VALIDAR") content = conNota(badge(AMBER_LIGHT, AMBER, "POR VALIDAR"));
                           else if (estado === "APROBADO") content = conNota(badge(GREEN_LIGHT, GREEN, "APROBADO"));
                           else if (estado === "NO_SUSTENTADO") content = badge(GRAY_100, GRAY_900, "NO SUSTENTADO");
