@@ -87,8 +87,6 @@ const ESTATUS_TRANSITO = [
     ayuda: "Hoja con el N° de LPN escrito a mano. Escríbelo claro y en tamaño grande." },
   { key: "DERIVADO",          label: "Derivado",             requiereFoto: true,  bg: BLUE_LIGHT,  fg: BLUE,
     ayuda: "Voucher o anotación a mano donde aparezca el N° de LPN." },
-  { key: "PENDIENTE_ENTREGA", label: "Pendiente de entrega", requiereFoto: false, bg: AMBER_LIGHT, fg: AMBER,
-    ayuda: "Aún no se entrega. No lleva foto; actualiza el estatus cuando se entregue." },
   { key: "SINIESTRO",         label: "Siniestro",            requiereFoto: false, bg: RED_LIGHT,   fg: RED_DARK,
     ayuda: "Queda registrado como no sustentado. No lleva foto." },
 ];
@@ -102,13 +100,14 @@ const MAX_INTENTOS_IA_TRANSITO = 3;
 // Estado "real" de un registro de tránsito, combinando las columnas.
 // Un bulto sin respuesta del transportista tiene estado_validacion_admin =
 // 'PENDIENTE' por default, pero eso NO significa que haya algo por validar.
-// NO_SUSTENTADO y PENDIENTE_ENTREGA se derivan del estatus del transportista
-// (no se guardan en estado_validacion_admin) porque no pasan por validación.
+// NO_SUSTENTADO se deriva del estatus Siniestro (no pasa por validación). Un
+// bulto sin respuesta se entiende como pendiente de entrega; registros con el
+// antiguo estatus PENDIENTE_ENTREGA se tratan igual.
 function estadoTransito(r) {
   if (r.estado_validacion_admin === "APROBADO") return "APROBADO";
   if (r.estado_validacion_admin === "DESAPROBADO") return "DESAPROBADO";
   if (r.estatus_transportista === "SINIESTRO") return "NO_SUSTENTADO";
-  if (r.estatus_transportista === "PENDIENTE_ENTREGA") return "PENDIENTE_ENTREGA";
+  if (r.estatus_transportista === "PENDIENTE_ENTREGA") return "SIN_RESPUESTA";
   if (r.respuesta_transportista) return "POR_VALIDAR";
   return "SIN_RESPUESTA";
 }
@@ -126,7 +125,7 @@ function transitoBloqueadoIA(r) {
 // fecha límite. El botón aparece desde 1 día antes de la fecha vigente (y se
 // mantiene después de vencida). La fecha vigente es la reprogramada si existe;
 // si no, la original. La nueva fecha siempre debe ser posterior a la vigente.
-const ESTADOS_REPROGRAMABLES = ["SIN_RESPUESTA", "PENDIENTE_ENTREGA", "DESAPROBADO"];
+const ESTADOS_REPROGRAMABLES = ["SIN_RESPUESTA", "DESAPROBADO"];
 
 const pad2 = n => String(n).padStart(2, "0");
 // Fechas como texto "AAAA-MM-DD" en hora local (Perú), sin pasar por UTC.
@@ -157,10 +156,10 @@ const FILTROS_TRANSITO_VACIOS = {
 
 // Opciones del filtro "Validación": los mismos valores de la columna.
 const OPCIONES_VALIDACION_TRANSITO = [
+  { key: "SIN_RESPUESTA", label: "Pendiente de entrega" },
   { key: "POR_VALIDAR",   label: "Por validar" },
   { key: "APROBADO",      label: "Aprobado" },
   { key: "DESAPROBADO",   label: "Desaprobado" },
-  { key: "NO_SUSTENTADO", label: "No sustentado" },
 ];
 
 // Estatus para la columna y el filtro: uno de ESTATUS_TRANSITO o
@@ -1199,20 +1198,15 @@ export default function App() {
   }
 
   // --- Tránsitos: transportista guarda su respuesta (estatus + fotos) ---
-  // Bultos a los que se aplica la respuesta: el bulto puntual, o toda la carga
-  // EXCEPTO:
+  // El sustento es SIEMPRE por carga completa (ya no hay sustento parcial).
+  // Se aplica a todos los bultos de la carga EXCEPTO:
   //  (a) los ya aprobados: un reenvío no debe borrar una aprobación;
-  //  (b) los que tienen un sustento individual propio ("solo este bulto"): un
-  //      sustento a nivel carga no los pisa. El bulto desde el que se abrió el
-  //      modal sí entra si el usuario desmarcó "solo este bulto";
-  //  (c) los bloqueados por intentos de IA: ya solo los resuelve el admin.
-  function objetivosSustento(registro, soloEsteBulto) {
-    if (soloEsteBulto) return transitos.filter(t => t.nro_lpn_final === registro.nro_lpn_final);
+  //  (b) los bloqueados por intentos de IA: ya solo los resuelve el admin.
+  function objetivosSustento(registro) {
     return transitos.filter(t =>
       t.nro_carga_final === registro.nro_carga_final &&
       t.estado_validacion_admin !== "APROBADO" &&
-      !transitoBloqueadoIA(t) &&
-      (!t.sustento_individual || t.nro_lpn_final === registro.nro_lpn_final)
+      !transitoBloqueadoIA(t)
     );
   }
 
@@ -1247,9 +1241,9 @@ export default function App() {
       return;
     }
     const registro = transitoSustentoModal;
-    const objetivos = objetivosSustento(registro, transitoSoloEsteBulto);
+    const objetivos = objetivosSustento(registro);
     if (objetivos.length === 0) {
-      setTransitoErr("No quedan bultos por sustentar en esta carga: están aprobados, tienen sustento individual o ya los revisa el admin.");
+      setTransitoErr("No quedan bultos por sustentar en esta carga: están aprobados o ya los revisa el admin.");
       return;
     }
     setTransitoSaving(true);
@@ -1373,7 +1367,7 @@ export default function App() {
 
   function abrirSustentoTransito(r) {
     setTransitoSustentoModal(r);
-    setTransitoSoloEsteBulto(!!r.sustento_individual);
+    setTransitoSoloEsteBulto(false);
     setTransitoOpcionElegida(null);
     setTransitoMotivo("");
     setTransitoArchivos([]);
@@ -2914,7 +2908,7 @@ export default function App() {
         const semanas = unicos(r => r.semana_llegada_estimada).map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
 
         // Pendiente de sustentar = lo que todavía le toca al transportista.
-        const pendienteSustento = r => ["SIN_RESPUESTA", "PENDIENTE_ENTREGA", "DESAPROBADO"].includes(estadoTransito(r));
+        const pendienteSustento = r => ["SIN_RESPUESTA", "DESAPROBADO"].includes(estadoTransito(r));
         const cuenta = fn => datos.filter(fn).length;
         const total = datos.length;
         const nPendientes = cuenta(pendienteSustento);
@@ -2954,7 +2948,7 @@ export default function App() {
           if (estadoTransito(r) === "POR_VALIDAR") g.por_validar++;
           if (estadoTransito(r) === "APROBADO") g.aprobados++;
         }
-        const ranking = Object.values(porProveedor).map(g => ({ ...g, pct_avance: g.total > 0 ? Math.round(((g.total - g.pendiente) / g.total) * 1000) / 10 : 0 }));
+        const ranking = Object.values(porProveedor).map(g => ({ ...g, pct_avance: g.total > 0 ? ((g.total - g.pendiente) / g.total) * 100 : 0 }));
         const { col, dir } = rankingTSort;
         ranking.sort((a, b) => {
           if (col === "proveedor") return dir === "desc" ? String(b.proveedor || "").localeCompare(String(a.proveedor || "")) : String(a.proveedor || "").localeCompare(String(b.proveedor || ""));
@@ -2963,12 +2957,13 @@ export default function App() {
 
         const sel = { ...inp, width: 150 };
         const etiqueta = t => <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 5 }}>{t}</div>;
-        const badgePct = (p, invertido) => {
-          const bueno = invertido ? p <= 30 : p >= 70;
-          const medio = invertido ? p <= 60 : p >= 40;
-          const c = bueno ? GREEN : medio ? AMBER : RED_DARK;
-          const bg = bueno ? GREEN_LIGHT : medio ? AMBER_LIGHT : RED_LIGHT;
-          return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{p}%</span>;
+        // Semáforo de avance: hasta 80% rojo, más de 80% hasta 95% amarillo,
+        // más de 95% verde. Siempre con 2 decimales.
+        const badgePct = (p) => {
+          const verde = p > 95, amarillo = p > 80 && p <= 95;
+          const c = verde ? GREEN : amarillo ? AMBER : RED_DARK;
+          const bg = verde ? GREEN_LIGHT : amarillo ? AMBER_LIGHT : RED_LIGHT;
+          return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: c }}>{Number(p || 0).toFixed(2)}%</span>;
         };
         const td = { padding: "8px 8px", textAlign: "center", borderBottom: `0.5px solid ${BORDER}`, borderRight: `0.5px solid ${BORDER}` };
 
@@ -3049,7 +3044,7 @@ export default function App() {
               <div style={{ fontSize: 12, color: GRAY_500, marginBottom: 6 }}>Bultos pendientes</div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ fontSize: 24, fontWeight: 600, color: GRAY_900 }}>{nPendientes} <span style={{ fontSize: 13, color: GRAY_500, fontWeight: 400 }}>/ {total}</span></div>
-                {badgePct(total > 0 ? Math.round((nPendientes / total) * 100) : 0, true)}
+                <span title="% de avance: bultos ya sustentados sobre el total">{badgePct(total > 0 ? ((total - nPendientes) / total) * 100 : 0)}</span>
               </div>
             </div>
             <div style={{ background: GRAY_50, borderRadius: 10, padding: "14px 16px" }}>
@@ -3117,7 +3112,7 @@ export default function App() {
                       <td style={{ ...td, color: r.por_validar > 0 ? AMBER : GRAY_900 }}>{r.por_validar}</td>
                       <td style={{ ...td, color: GREEN }}>{r.aprobados}</td>
                       <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtSoles(r.valorizado_pend)}</td>
-                      <td style={{ ...td, borderRight: "none" }}>{badgePct(r.pct_avance, false)}</td>
+                      <td style={{ ...td, borderRight: "none" }}>{badgePct(r.pct_avance)}</td>
                     </tr>
                   ))}
                   {ranking.length === 0 && (
@@ -3444,15 +3439,13 @@ export default function App() {
                           const def = ESTATUS_TRANSITO_POR_KEY[r.estatus_transportista];
                           const b = def ? badge(def.bg, def.fg, def.label.toUpperCase())
                             : badge(GRAY_100, GRAY_500, "SIN RESPUESTA");
-                          content = def && r.sustento_individual ? (
-                            <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>Solo este bulto</div></div>
-                          ) : b;
+                          content = b;
                         } else if (c.key === "estado_validacion_admin") {
                           const nota = notaIATransito(r);
                           const conNota = (b) => nota ? (
                             <div>{b}<div style={{ fontSize: 10, color: GRAY_500, marginTop: 3 }}>{nota}</div></div>
                           ) : b;
-                          if (estado === "SIN_RESPUESTA" || estado === "PENDIENTE_ENTREGA") content = <span style={{ color: GRAY_200 }}>—</span>;
+                          if (estado === "SIN_RESPUESTA") content = badge(GRAY_100, GRAY_500, "PENDIENTE DE ENTREGA");
                           else if (estado === "POR_VALIDAR") content = conNota(badge(AMBER_LIGHT, AMBER, "POR VALIDAR"));
                           else if (estado === "APROBADO") content = conNota(badge(GREEN_LIGHT, GREEN, "APROBADO"));
                           else if (estado === "NO_SUSTENTADO") content = badge(GRAY_100, GRAY_900, "NO SUSTENTADO");
@@ -3510,7 +3503,6 @@ export default function App() {
                             {estado === "SIN_RESPUESTA" ? "Sustentar"
                               : estado === "APROBADO" || transitoBloqueadoIA(r) ? "Ver"
                               : estado === "DESAPROBADO" ? "Volver a sustentar"
-                              : estado === "PENDIENTE_ENTREGA" ? "Actualizar"
                               : "Modificar"}
                           </button>
                         )}
@@ -3697,13 +3689,11 @@ export default function App() {
         const reg = transitoSustentoModal;
         const bultosDeLaCarga = transitos.filter(t => t.nro_carga_final === reg.nro_carga_final);
         const aprobadosEnCarga = bultosDeLaCarga.filter(t => t.estado_validacion_admin === "APROBADO").length;
-        const individualesEnCarga = bultosDeLaCarga.filter(t =>
-          t.sustento_individual && t.estado_validacion_admin !== "APROBADO" && t.nro_lpn_final !== reg.nro_lpn_final).length;
         const bloqueadosEnCarga = bultosDeLaCarga.filter(t => transitoBloqueadoIA(t) && t.nro_lpn_final !== reg.nro_lpn_final).length;
         const plural = (n, uno, varios) => (n === 1 ? uno : varios);
         const bloqueado = transitoBloqueadoIA(reg);
         const soloLectura = reg.estado_validacion_admin === "APROBADO" || bloqueado;
-        const nObjetivo = objetivosSustento(reg, transitoSoloEsteBulto).length;
+        const nObjetivo = objetivosSustento(reg).length;
         const defElegido = ESTATUS_TRANSITO_POR_KEY[transitoOpcionElegida];
         const res = transitoResultadoIA;
         const filaActual = (lpn) => transitos.find(t => t.nro_lpn_final === lpn);
@@ -3712,9 +3702,8 @@ export default function App() {
           return e === "APROBADO" ? { txt: t.validado_por === "IA" ? "Aprobado por IA" : "Aprobado", fg: GREEN }
             : e === "DESAPROBADO" ? { txt: "Desaprobado", fg: RED_DARK }
             : e === "POR_VALIDAR" ? { txt: transitoBloqueadoIA(t) ? "Lo revisa el admin" : "Por validar", fg: AMBER }
-            : e === "PENDIENTE_ENTREGA" ? { txt: "Pendiente de entrega", fg: AMBER }
             : e === "NO_SUSTENTADO" ? { txt: "No sustentado", fg: GRAY_900 }
-            : { txt: "Sin respuesta", fg: GRAY_500 };
+            : { txt: "Pendiente de entrega", fg: GRAY_500 };
         };
         const btnSec = { flex: 1, padding: "8px 0", background: "white", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12, color: GRAY_500, cursor: "pointer" };
         const btnPri = (activo, color) => ({ flex: 1, padding: "8px 0", background: activo ? color : GRAY_200, color: activo ? "white" : GRAY_500, border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: activo ? "pointer" : "default" });
@@ -3847,26 +3836,19 @@ export default function App() {
                             return (
                               <div key={b.nro_lpn_final} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                 <span style={{ fontFamily: "monospace", color: GRAY_900, fontWeight: esEste ? 700 : 400 }}>{b.nro_lpn_final}{esEste ? " (este)" : ""}</span>
-                                <span style={{ color: et.fg }}>{et.txt}{b.sustento_individual ? ", individual" : ""}</span>
+                                <span style={{ color: et.fg }}>{et.txt}</span>
                               </div>
                             );
                           })}
                         </div>
                       </div>
 
-                      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, fontSize: 12, color: GRAY_900, cursor: "pointer" }}>
-                        <input type="checkbox" checked={transitoSoloEsteBulto} onChange={e => { setTransitoSoloEsteBulto(e.target.checked); setTransitoErr(""); }} style={{ marginTop: 2 }} />
-                        <span>Aplicar solo a este bulto ({reg.nro_lpn_final}), para un sustento parcial</span>
-                      </label>
-                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 16, paddingLeft: 21 }}>
-                        {transitoSoloEsteBulto
-                          ? "El estatus se guardará solo en este bulto."
-                          : [
-                              `El estatus se guardará en ${nObjetivo} ${plural(nObjetivo, "bulto", "bultos")} de la carga.`,
-                              aprobadosEnCarga > 0 ? `${aprobadosEnCarga} ${plural(aprobadosEnCarga, "ya aprobado no se modifica", "ya aprobados no se modifican")}.` : "",
-                              individualesEnCarga > 0 ? `${individualesEnCarga} con sustento individual ${plural(individualesEnCarga, "se mantiene", "se mantienen")}.` : "",
-                              bloqueadosEnCarga > 0 ? `${bloqueadosEnCarga} en revisión del administrador no ${plural(bloqueadosEnCarga, "se modifica", "se modifican")}.` : "",
-                            ].filter(Boolean).join(" ")}
+                      <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 16 }}>
+                        {[
+                          `El estatus se guardará en ${nObjetivo} ${plural(nObjetivo, "bulto", "bultos")} de la carga.`,
+                          aprobadosEnCarga > 0 ? `${aprobadosEnCarga} ${plural(aprobadosEnCarga, "ya aprobado no se modifica", "ya aprobados no se modifican")}.` : "",
+                          bloqueadosEnCarga > 0 ? `${bloqueadosEnCarga} en revisión del administrador no ${plural(bloqueadosEnCarga, "se modifica", "se modifican")}.` : "",
+                        ].filter(Boolean).join(" ")}
                         {reg.respuesta_transportista ? " Reemplaza el estatus anterior." : ""}
                       </div>
 
@@ -3900,7 +3882,7 @@ export default function App() {
                             <>
                               <div style={{ fontSize: 11, color: GRAY_500, marginBottom: 6, lineHeight: 1.5 }}>
                                 Adjunta hasta 2 fotos donde se vea el N° de LPN completo, enfocado y sin reflejos. La foto se valida automáticamente.
-                                {transitoSoloEsteBulto && (reg.intentos_ia || 0) > 0
+                                {(reg.intentos_ia || 0) > 0
                                   ? ` Te ${plural(MAX_INTENTOS_IA_TRANSITO - (reg.intentos_ia || 0), "queda", "quedan")} ${MAX_INTENTOS_IA_TRANSITO - (reg.intentos_ia || 0)} de ${MAX_INTENTOS_IA_TRANSITO} intentos.`
                                   : ""}
                               </div>
