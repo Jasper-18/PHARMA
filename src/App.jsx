@@ -63,7 +63,7 @@ const PILOTO_TRANSITOS_PROVEEDORES = ["RANSA"];
 const COLS_TRANSITOS_TRANSPORTISTA = [
   { key: "nro_carga_final",          label: "N° Carga",   width: 130, mono: true },
   { key: "nro_lpn_final",            label: "N° LPN",     width: 150, mono: true },
-  { key: "nombre_ruta_consolidada",  label: "Ruta",       width: 140 },
+  { key: "ruta_concatenada",         label: "Ruta",       width: 170 },
   { key: "cod_sucursal_planificada",    label: "Cód. SAP",   width: 80,  mono: true },
   { key: "nombre_sucursal_planificada", label: "Botica",     width: 170 },
   { key: "tipo_mercaderia",          label: "Tipo Mercadería", width: 110 },
@@ -148,6 +148,15 @@ function puedeReprogramar(r) {
   return hoyISO() >= sumarDiasISO(vigente, -1);
 }
 
+// Ruta mostrada en la app: código + nombre consolidado. Ej.: "3010 - PUCALLPA".
+// No es una columna de Supabase; se arma con cod_ruta y nombre_ruta_consolidada.
+function rutaTransito(r) {
+  return [r.cod_ruta, r.nombre_ruta_consolidada]
+    .map(v => (v == null ? "" : String(v).trim()))
+    .filter(Boolean)
+    .join(" - ");
+}
+
 // Filtros del panel de Tránsitos. Todos se aplican en el navegador sobre los
 // bultos ya cargados (no hacen otra consulta a Supabase).
 const FILTROS_TRANSITO_VACIOS = {
@@ -172,7 +181,7 @@ function filtrarTransitos(lista, f, isAdmin) {
   const q = (f.busqueda || "").trim().toLowerCase();
   return lista.filter(r => {
     if (f.proveedor && r.proveedor !== f.proveedor) return false;
-    if (f.ruta && r.nombre_ruta_consolidada !== f.ruta) return false;
+    if (f.ruta && rutaTransito(r) !== f.ruta) return false;
     if (f.tipo && r.tipo_mercaderia !== f.tipo) return false;
     if (f.estatus && estatusFiltroTransito(r) !== f.estatus) return false;
     if (f.validacion && estadoTransito(r) !== f.validacion) return false;
@@ -184,7 +193,7 @@ function filtrarTransitos(lista, f, isAdmin) {
       if (f.hasta && fecha > f.hasta) return false;
     }
     if (q) {
-      const campos = [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_planificada, r.nombre_sucursal_planificada, r.nombre_ruta_consolidada];
+      const campos = [r.nro_carga_final, r.nro_lpn_final, r.cod_sucursal_planificada, r.nombre_sucursal_planificada, rutaTransito(r)];
       if (isAdmin) campos.push(r.proveedor);
       if (!campos.some(v => String(v ?? "").toLowerCase().includes(q))) return false;
     }
@@ -2336,7 +2345,7 @@ export default function App() {
         const d = transitoFiltrosDraft;
         const setD = (campo, valor) => setTransitoFiltrosDraft(prev => ({ ...prev, [campo]: valor }));
         const unicos = (fn) => [...new Set(transitos.map(fn).filter(v => v != null && v !== ""))];
-        const rutas = unicos(r => r.nombre_ruta_consolidada).sort((x, y) => String(x).localeCompare(String(y)));
+        const rutas = unicos(rutaTransito).sort((x, y) => String(x).localeCompare(String(y), "es", { numeric: true }));
         const tipos = unicos(r => r.tipo_mercaderia).sort((x, y) => String(x).localeCompare(String(y)));
         const semanas = unicos(r => r.semana_llegada_estimada).map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
         const proveedores = unicos(r => r.proveedor).sort();
@@ -2912,7 +2921,7 @@ export default function App() {
         const setF = (campo, valor) => setDashT(prev => ({ ...prev, [campo]: valor }));
         const unicos = (fn) => [...new Set(transitos.map(fn).filter(v => v != null && v !== ""))];
         const proveedores = unicos(r => r.proveedor).sort();
-        const rutas = unicos(r => r.nombre_ruta_consolidada).sort((x, y) => String(x).localeCompare(String(y)));
+        const rutas = unicos(rutaTransito).sort((x, y) => String(x).localeCompare(String(y), "es", { numeric: true }));
         const tipos = unicos(r => r.tipo_mercaderia).sort((x, y) => String(x).localeCompare(String(y)));
         const semanas = unicos(r => r.semana_llegada_estimada).map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
 
@@ -3479,6 +3488,8 @@ export default function App() {
                           else content = <span style={{ color: GRAY_200 }}>—</span>;
                         } else if (c.key === "costo_total") {
                           content = r.costo_total != null ? Number(r.costo_total).toFixed(2) : "—";
+                        } else if (c.key === "ruta_concatenada") {
+                          content = rutaTransito(r) || "—";
                         } else if (c.key === "semana_llegada_estimada") {
                           content = r.semana_llegada_estimada != null ? `SEM ${r.semana_llegada_estimada}` : "—";
                         } else if (c.key === "fecha_reprogramada") {
@@ -3958,7 +3969,7 @@ export default function App() {
               <br />
               {reg.proveedor || "—"}
               {reg.nombre_sucursal_planificada ? `, botica ${reg.cod_sucursal_planificada ? `${reg.cod_sucursal_planificada} ` : ""}${reg.nombre_sucursal_planificada}` : ""}
-              {reg.nombre_ruta_consolidada ? `, ruta ${reg.nombre_ruta_consolidada}` : ""}
+              {rutaTransito(reg) ? `, ruta ${rutaTransito(reg)}` : ""}
               {reg.fecha_limite_transp ? `, fecha límite ${fmtFechaSolo(reg.fecha_limite_transp)}` : ""}
               {reg.fecha_reprogramada ? `, reprogramada al ${fmtFechaSolo(reg.fecha_reprogramada)}` : ""}
             </div>
