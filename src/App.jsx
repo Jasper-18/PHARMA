@@ -54,7 +54,7 @@ const PILOTO_COTIZACION_PROVEEDOR = "RANSA";
 // (empresa_id, igual que TRANSPORTISTA_ESTANDARIZADO del Excel) que ya lo
 // ven. Para sumar uno, agregarlo aquí. Cuando el equipo lo valide, cambiar a
 // null para habilitarlo a todos.
-const PILOTO_TRANSITOS_PROVEEDORES = ["RANSA"];
+const PILOTO_TRANSITOS_PROVEEDORES = null; // habilitado para todos los transportistas
 
 
 // Columnas de la tabla de Tránsitos: sin Instalación, con la botica de
